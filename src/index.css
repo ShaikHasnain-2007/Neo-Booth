@@ -1,0 +1,101 @@
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Space+Grotesk:wght@400;500;700&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Space Grotesk', 'Inter', sans-serif;
+  --font-mono: 'Share Tech Mono', 'Courier New', monospace;
+
+  --color-sage-50: #f4f7f4;
+  --color-sage-100: #e6ede6;
+  --color-sage-200: #cfdec0;
+  --color-sage-300: #a3be91;
+  --color-sage-400: #7e9e6e;
+  --color-sage-500: #628153;
+  --color-sage-600: #4c6540;
+
+  --color-pastelpink-50: #fff5f6;
+  --color-pastelpink-100: #ffebeeff;
+  --color-pastelpink-200: #ffd6de;
+  --color-pastelpink-300: #ffa3b5;
+  --color-pastelpink-400: #ff708d;
+  --color-pastelpink-500: #ff3d66;
+
+  --color-maroon-50: #faf2f3;
+  --color-maroon-800: #5c0617;
+  --color-maroon-900: #3d020d;
+
+  --color-cream-50: #fbfbf9;
+  --color-cream-100: #f5f4f0;
+  --color-cream-200: #eae8e1;
+  --color-cream-900: #1b1b19;
+
+  --shadow-neo: 4px 4px 0px 0px rgba(0, 0, 0, 1);
+  --shadow-neo-sm: 2px 2px 0px 0px rgba(0, 0, 0, 1);
+  --shadow-neo-lg: 8px 8px 0px 0px rgba(0, 0, 0, 1);
+  --shadow-neo-white: 4px 4px 0px 0px rgba(255, 255, 255, 1);
+}
+
+body {
+  background-color: var(--color-cream-50);
+  color: var(--color-cream-900);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+::selection {
+  background-color: var(--color-pastelpink-200);
+  color: var(--color-pastelpink-500);
+}
+
+@keyframes flash-animation {
+  0% {
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.camera-flash {
+  animation: flash-animation 0.5s ease-out forwards;
+}
+
+.y2k-grid {
+  background-image: 
+    linear-gradient(to right, rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.y2k-grid-dark {
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background-color: var(--color-cream-100);
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-cream-900);
+  border: 2px solid var(--color-cream-100);
+}
+
+.bg-scanlines {
+  background: linear-gradient(
+    rgba(18, 16, 16, 0) 50%, 
+    rgba(0, 0, 0, 0.35) 50%
+  );
+  background-size: 100% 4px;
+}
