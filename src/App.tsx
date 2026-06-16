@@ -52,7 +52,6 @@ function App() {
   const [stitchedPhoto, setStitchedPhoto] = useState<string>('');
   const [soundEnabled, setSoundEnabledState] = useState(true);
   
-  
   const [options, setOptions] = useState<StitchOptions>({
     layout: 'vertical-4',
     backgroundColor: '#FFFFFF',
@@ -70,18 +69,15 @@ function App() {
     customBrightness: 0,
   });
 
-  
   const [stickers, setStickers] = useState<StickerInstance[]>([]);
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
 
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
-  
   useEffect(() => {
     setSoundEnabled(soundEnabled);
   }, [soundEnabled]);
 
-  
   useEffect(() => {
     const neededPhotos = getPhotoCountForLayout(options.layout);
     if (photos.length === neededPhotos) {
@@ -116,7 +112,6 @@ function App() {
     setView('landing');
   };
 
-  
   const addSticker = (type: string) => {
     playClick();
     const newSticker: StickerInstance = {
@@ -167,7 +162,6 @@ function App() {
     setSelectedStickerId(null);
   };
 
-  
   const handleStickerMouseDown = (e: React.MouseEvent, id: string) => {
     e.preventDefault();
     setSelectedStickerId(id);
@@ -206,7 +200,6 @@ function App() {
     document.addEventListener('mouseup', handleMouseUp);
   };
 
-  
   const handleStickerTouchStart = (e: React.TouchEvent, id: string) => {
     setSelectedStickerId(id);
     const container = previewContainerRef.current;
@@ -302,7 +295,6 @@ function App() {
         </div>
 
         <div className="flex items-center gap-3 mt-4 md:mt-0 font-mono text-xs font-bold uppercase">
-
           <button
             onClick={handleToggleSound}
             className={`flex items-center gap-1.5 px-3 py-1 border-2 border-cream-900 rounded-lg shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all cursor-pointer ${
@@ -521,7 +513,6 @@ function App() {
               exit={{ opacity: 0, y: -15 }}
               className="w-full flex flex-col lg:flex-row gap-8 items-start justify-center"
             >
-
               <div className="w-full lg:w-1/2 flex flex-col items-center gap-4">
                 <div className="flex items-center justify-between w-full max-w-md px-2 lg:px-0">
                   <span className="font-mono text-xs font-bold uppercase text-cream-500">
@@ -639,7 +630,6 @@ function App() {
 
                 {stitchedPhoto && <ExportPanel options={options} onChange={setOptions} dataUrl={stitchedPhoto} />}
               </div>
-
             </motion.div>
           )}
 

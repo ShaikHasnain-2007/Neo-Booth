@@ -105,8 +105,6 @@ const getBadgeTextForSticker = (type: string): string | null => {
   }
 };
 
-
-
 function applyCustomPixelAdjustments(
   ctx: CanvasRenderingContext2D,
   x: number,

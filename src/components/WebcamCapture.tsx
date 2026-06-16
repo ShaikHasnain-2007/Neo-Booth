@@ -3,6 +3,15 @@ import { Camera, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { playBeep, playShutter, playClick } from '../utils/audioEngine';
 
+// MediaPipe facial landmark connections for procedural drawing
+const OVAL_INDEXES = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
+const LIPS_INDEXES = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95, 78];
+const LEFT_EYE_INDEXES = [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466];
+const RIGHT_EYE_INDEXES = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246];
+const LEFT_EYEBROW_INDEXES = [276, 283, 282, 295, 285, 336, 296, 334, 293, 300];
+const RIGHT_EYEBROW_INDEXES = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
+const NOSE_INDEXES = [168, 6, 197, 195, 5, 4, 1, 19, 94, 2];
+
 interface WebcamCaptureProps {
   onCaptureComplete: (photos: string[]) => void;
   photoCount: number;
@@ -10,13 +19,219 @@ interface WebcamCaptureProps {
 }
 
 type CapturePhase = 'idle' | 'countdown' | 'flash' | 'intermission';
+type ARFilter = 'none' | 'cyber-mesh' | 'retro-shades' | 'heart-blush';
+
+function drawPath(ctx: CanvasRenderingContext2D, landmarks: any[], indexes: number[], close = false) {
+  if (landmarks.length === 0) return;
+  ctx.beginPath();
+  ctx.moveTo(landmarks[indexes[0]].x, landmarks[indexes[0]].y);
+  for (let i = 1; i < indexes.length; i++) {
+    const pt = landmarks[indexes[i]];
+    if (pt) ctx.lineTo(pt.x, pt.y);
+  }
+  if (close) ctx.closePath();
+  ctx.stroke();
+}
+
+function drawFilters(ctx: CanvasRenderingContext2D, landmarks: any[], filter: ARFilter) {
+  if (filter === 'none') return;
+
+  ctx.save();
+
+  if (filter === 'cyber-mesh') {
+    // Cyberpunk Neon Mesh Outline
+    ctx.strokeStyle = 'rgba(0, 255, 204, 0.85)'; // Neon Teal
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = 'rgba(0, 255, 204, 0.6)';
+    ctx.shadowBlur = 6;
+
+    // Draw main contours
+    drawPath(ctx, landmarks, OVAL_INDEXES, true);
+    drawPath(ctx, landmarks, LIPS_INDEXES, true);
+    drawPath(ctx, landmarks, LEFT_EYE_INDEXES, true);
+    drawPath(ctx, landmarks, RIGHT_EYE_INDEXES, true);
+    drawPath(ctx, landmarks, LEFT_EYEBROW_INDEXES, false);
+    drawPath(ctx, landmarks, RIGHT_EYEBROW_INDEXES, false);
+    drawPath(ctx, landmarks, NOSE_INDEXES, false);
+
+    // Draw tracking nodes at key points
+    ctx.fillStyle = 'rgba(255, 0, 128, 0.9)'; // Neon Pink nodes
+    ctx.shadowColor = 'rgba(255, 0, 128, 0.8)';
+    const nodeIndexes = [10, 152, 130, 359, 168, 4, 308, 78]; // Forehead, chin, outer eyes, nose bridge, mouth corners
+    nodeIndexes.forEach(idx => {
+      const pt = landmarks[idx];
+      if (pt) {
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Draw little bracket/target crosshair overlay on eyes
+        if (idx === 130 || idx === 359) {
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+    });
+  }
+
+  if (filter === 'retro-shades') {
+    // Procedural Neon Y2K Cyber Visor / Glasses
+    const noseBridge = landmarks[168];
+    const leftEyeOuter = landmarks[130];
+    const rightEyeOuter = landmarks[359];
+
+    if (noseBridge && leftEyeOuter && rightEyeOuter) {
+      const dx = rightEyeOuter.x - leftEyeOuter.x;
+      const dy = rightEyeOuter.y - leftEyeOuter.y;
+      const angle = Math.atan2(dy, dx);
+      const eyeDistance = Math.sqrt(dx * dx + dy * dy);
+
+      ctx.translate(noseBridge.x, noseBridge.y);
+      ctx.rotate(angle);
+
+      const w = eyeDistance * 1.95;
+      const h = w * 0.35;
+
+      // Draw Visor Body
+      const gradient = ctx.createLinearGradient(0, -h/2, 0, h/2);
+      gradient.addColorStop(0, 'rgba(255, 0, 127, 0.85)'); // Hot Pink
+      gradient.addColorStop(0.5, 'rgba(128, 0, 128, 0.7)'); // Deep Purple
+      gradient.addColorStop(1, 'rgba(0, 0, 128, 0.85)'); // Midnight Blue
+
+      ctx.fillStyle = gradient;
+      ctx.strokeStyle = 'rgba(0, 255, 204, 0.9)'; // Neon Teal Border
+      ctx.lineWidth = 3.5;
+      ctx.shadowColor = 'rgba(0, 255, 204, 0.8)';
+      ctx.shadowBlur = 10;
+
+      // Draw custom angular shape for Y2K visor
+      ctx.beginPath();
+      ctx.moveTo(-w * 0.5, -h * 0.4); // Top-left
+      ctx.lineTo(w * 0.5, -h * 0.4);  // Top-right
+      ctx.lineTo(w * 0.45, h * 0.4);  // Bottom-right
+      ctx.lineTo(w * 0.1, h * 0.4);   // Nose notch right
+      ctx.lineTo(0, h * 0.15);         // Nose notch top center
+      ctx.lineTo(-w * 0.1, h * 0.4);  // Nose notch left
+      ctx.lineTo(-w * 0.45, h * 0.4); // Bottom-left
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Draw cool tech HUD details on visor
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.shadowBlur = 0; // Disable shadow for details
+      
+      // Horizontal scanlines
+      ctx.save();
+      ctx.clip();
+      ctx.beginPath();
+      for (let yOffset = -h; yOffset < h; yOffset += 6) {
+        ctx.moveTo(-w, yOffset);
+        ctx.lineTo(w, yOffset);
+      }
+      ctx.stroke();
+      
+      // Cyber diagonal slash highlight
+      const highlightGrad = ctx.createLinearGradient(-w * 0.3, 0, w * 0.3, 0);
+      highlightGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+      highlightGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.3)');
+      highlightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = highlightGrad;
+      ctx.beginPath();
+      ctx.moveTo(-w, -h);
+      ctx.lineTo(-w * 0.2, -h);
+      ctx.lineTo(w * 0.2, h);
+      ctx.lineTo(-w, h);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  if (filter === 'heart-blush') {
+    // Soft blush + procedurally drawn neon hearts on cheeks
+    const leftCheek = landmarks[205];
+    const rightCheek = landmarks[425];
+    const nose = landmarks[4];
+    const forehead = landmarks[10];
+
+    // Calculate dynamic cheek circle radius based on face size
+    let faceSize = 60;
+    if (nose && forehead) {
+      faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.6;
+    }
+
+    const drawHeart = (c_x: number, c_y: number, size: number) => {
+      ctx.save();
+      ctx.beginPath();
+      const topCurveHeight = size * 0.3;
+      ctx.moveTo(c_x, c_y + topCurveHeight);
+      
+      // Left side curve
+      ctx.bezierCurveTo(
+        c_x - size / 2, c_y - topCurveHeight / 2,
+        c_x - size / 2, c_y + topCurveHeight,
+        c_x, c_y + size
+      );
+      
+      // Right side curve
+      ctx.bezierCurveTo(
+        c_x + size / 2, c_y + topCurveHeight,
+        c_x + size / 2, c_y - topCurveHeight / 2,
+        c_x, c_y + topCurveHeight
+      );
+      
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255, 51, 153, 0.85)'; // Neon Pink
+      ctx.shadowColor = 'rgba(255, 51, 153, 0.8)';
+      ctx.shadowBlur = 10;
+      ctx.fill();
+      ctx.restore();
+    };
+
+    const drawSoftBlush = (c_x: number, c_y: number, r: number) => {
+      const blushGrad = ctx.createRadialGradient(c_x, c_y, 0, c_x, c_y, r);
+      blushGrad.addColorStop(0, 'rgba(255, 105, 180, 0.55)');
+      blushGrad.addColorStop(0.5, 'rgba(255, 105, 180, 0.2)');
+      blushGrad.addColorStop(1, 'rgba(255, 105, 180, 0)');
+      
+      ctx.fillStyle = blushGrad;
+      ctx.beginPath();
+      ctx.arc(c_x, c_y, r, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
+    if (leftCheek) {
+      drawSoftBlush(leftCheek.x, leftCheek.y, faceSize);
+      drawHeart(leftCheek.x, leftCheek.y - faceSize * 0.35, faceSize * 0.55);
+    }
+    if (rightCheek) {
+      drawSoftBlush(rightCheek.x, rightCheek.y, faceSize);
+      drawHeart(rightCheek.x, rightCheek.y - faceSize * 0.35, faceSize * 0.55);
+    }
+  }
+
+  ctx.restore();
+}
 
 export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete, photoCount, isTraditional }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  
+  const landmarkerRef = useRef<any>(null);
+  const lastLandmarksRef = useRef<any>(null);
+  const lastDimensionsRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
 
   const [permissionState, setPermissionState] = useState<'prompt' | 'granted' | 'denied'>('prompt');
   const [errorMessage, setErrorMessage] = useState('');
+  const [isModelLoading, setIsModelLoading] = useState(true);
+  const [arFilter, setArFilter] = useState<ARFilter>('none');
+  const [hasLandmarker, setHasLandmarker] = useState(false);
 
   const [phase, setPhase] = useState<CapturePhase>('idle');
   const [countdownDuration, setCountdownDuration] = useState(3);
@@ -28,6 +243,45 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
   const [photosTaken, setPhotosTaken] = useState<string[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Initialize MediaPipe FaceLandmarker
+  useEffect(() => {
+    let active = true;
+    async function loadMediaPipe() {
+      try {
+        const vision = await import('@mediapipe/tasks-vision');
+        const filesetResolver = await vision.FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm"
+        );
+        const faceLandmarker = await vision.FaceLandmarker.createFromOptions(filesetResolver, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+            delegate: "GPU"
+          },
+          outputFaceBlendshapes: false,
+          runningMode: "VIDEO",
+          numFaces: 1
+        });
+        if (active) {
+          landmarkerRef.current = faceLandmarker;
+          setHasLandmarker(true);
+          setIsModelLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to load FaceLandmarker (AR filters disabled):", err);
+        if (active) {
+          setIsModelLoading(false);
+        }
+      }
+    }
+    loadMediaPipe();
+    return () => {
+      active = false;
+      if (landmarkerRef.current) {
+        landmarkerRef.current.close();
+      }
+    };
+  }, []);
 
   const startWebcam = async () => {
     setErrorMessage('');
@@ -83,39 +337,91 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
     }
   }, [permissionState]);
 
-  const captureFrame = useCallback((): string | null => {
+  // High performance canvas rendering loop with Face Mesh mapping
+  useEffect(() => {
+    let animationId: number;
     const video = videoRef.current;
-    if (!video || !streamRef.current) return null;
+    const canvas = canvasRef.current;
 
-    const canvas = document.createElement('canvas');
-    const targetW = 800;
-    const targetH = 600;
-    canvas.width = targetW;
-    canvas.height = targetH;
-
+    if (!video || !canvas) return;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
+    if (!ctx) return;
 
-    const videoWidth = video.videoWidth || 640;
-    const videoHeight = video.videoHeight || 480;
+    let lastVideoTime = -1;
 
-    const videoAspectRatio = videoWidth / videoHeight;
-    const targetAspectRatio = targetW / targetH;
+    const renderLoop = () => {
+      const videoW = video.videoWidth || 0;
+      const videoH = video.videoHeight || 0;
 
-    let sWidth = videoWidth;
-    let sHeight = videoHeight;
-    let sx = 0;
-    let sy = 0;
+      if (video.readyState >= 2 && videoW > 0 && videoH > 0) {
+        const targetW = 800;
+        const targetH = 600;
 
-    if (videoAspectRatio > targetAspectRatio) {
-      sWidth = videoHeight * targetAspectRatio;
-      sx = (videoWidth - sWidth) / 2;
-    } else {
-      sHeight = videoWidth / targetAspectRatio;
-      sy = (videoHeight - sHeight) / 2;
-    }
+        ctx.clearRect(0, 0, targetW, targetH);
 
-    ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+        // Aspect ratio crop (from camera stream 16:9 to photobooth 4:3)
+        const videoAspectRatio = videoW / videoH;
+        const targetAspectRatio = targetW / targetH;
+
+        let sWidth = videoW;
+        let sHeight = videoH;
+        let sx = 0;
+        let sy = 0;
+
+        if (videoAspectRatio > targetAspectRatio) {
+          sWidth = videoH * targetAspectRatio;
+          sx = (videoW - sWidth) / 2;
+        } else {
+          sHeight = videoW / targetAspectRatio;
+          sy = (videoH - sHeight) / 2;
+        }
+
+        // Draw camera frame
+        ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+
+        // Detect facial landmarks and apply overlay
+        const landmarker = landmarkerRef.current;
+        if (landmarker && video.currentTime !== lastVideoTime) {
+          lastVideoTime = video.currentTime;
+          
+          try {
+            const results = landmarker.detectForVideo(video, performance.now());
+            if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+              lastLandmarksRef.current = results.faceLandmarks[0];
+              lastDimensionsRef.current = { width: videoW, height: videoH };
+            }
+          } catch (err) {
+            console.error("Landmark detection error:", err);
+          }
+        }
+
+        // Render AR Filters using cached landmarks (ELIMINATES FLICKERING)
+        const cachedLandmarks = lastLandmarksRef.current;
+        const dims = lastDimensionsRef.current;
+        if (cachedLandmarks && dims.width > 0 && dims.height > 0 && arFilter !== 'none') {
+          const mappedLandmarks = cachedLandmarks.map((pt: any) => {
+            const x_pixel = ((pt.x * dims.width) - sx) / sWidth * targetW;
+            const y_pixel = ((pt.y * dims.height) - sy) / sHeight * targetH;
+            return { x: x_pixel, y: y_pixel, z: pt.z };
+          });
+          drawFilters(ctx, mappedLandmarks, arFilter);
+        }
+      }
+
+      animationId = requestAnimationFrame(renderLoop);
+    };
+
+    renderLoop();
+
+    return () => {
+      cancelAnimationFrame(animationId);
+    };
+  }, [arFilter, hasLandmarker]);
+
+  const captureFrame = useCallback((): string | null => {
+    const canvas = canvasRef.current;
+    if (!canvas || !streamRef.current) return null;
+    // Captures the complete canvas context including the active AR filter!
     return canvas.toDataURL('image/png');
   }, []);
 
@@ -188,6 +494,14 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
           </div>
         )}
 
+        {permissionState === 'granted' && isModelLoading && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-cream-900/60 text-cream-100 p-6 z-40 backdrop-blur-md">
+            <RefreshCw className="w-12 h-12 mb-4 animate-spin text-pastelpink-400" />
+            <p className="text-xl font-bold uppercase tracking-wider text-center">Loading AR Engine...</p>
+            <p className="text-[10px] text-cream-300 font-mono mt-2 uppercase tracking-widest">Calibrating face tracker</p>
+          </div>
+        )}
+
         {permissionState === 'denied' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-cream-100 p-6 bg-red-950/20 backdrop-blur-sm">
             <AlertTriangle className="w-16 h-16 mb-4 text-pastelpink-400" />
@@ -204,6 +518,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
 
         {permissionState === 'granted' && (
           <>
+            {/* Hidden Video Feed */}
             <video
               ref={videoRef}
               autoPlay
@@ -212,6 +527,14 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
               onLoadedMetadata={(e) => {
                 e.currentTarget.play().catch(err => console.error("Video play failed:", err));
               }}
+              className="hidden"
+            />
+
+            {/* Live Canvas Viewport */}
+            <canvas
+              ref={canvasRef}
+              width={800}
+              height={600}
               className="w-full h-full object-cover scale-x-[-1] relative z-10"
             />
 
@@ -252,6 +575,34 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
 
               <div className="absolute inset-0 bg-scanlines pointer-events-none opacity-[0.03]" />
             </div>
+
+            {/* Snapchat-Style AR Filter Lenses */}
+            {!isActive && !isModelLoading && hasLandmarker && (
+              <div className="absolute bottom-16 left-0 right-0 flex justify-center gap-3 z-30">
+                {[
+                  { id: 'none', label: 'Off', icon: '🚫' },
+                  { id: 'cyber-mesh', label: 'Mesh', icon: '🧬' },
+                  { id: 'retro-shades', label: 'Shades', icon: '🕶️' },
+                  { id: 'heart-blush', label: 'Blush', icon: '💖' },
+                ].map((filt) => (
+                  <button
+                    key={filt.id}
+                    onClick={() => {
+                      playClick();
+                      setArFilter(filt.id as ARFilter);
+                    }}
+                    title={filt.label}
+                    className={`w-12 h-12 rounded-full border-2 flex flex-col items-center justify-center text-xl transition-all shadow-neo-sm hover:scale-105 active:scale-95 cursor-pointer z-30 ${
+                      arFilter === filt.id
+                        ? 'bg-pastelpink-300 text-cream-900 border-cream-900 scale-110 shadow-none translate-y-[2px] ring-2 ring-white/50'
+                        : 'bg-cream-50/90 text-cream-800 border-cream-900 hover:bg-pastelpink-50'
+                    }`}
+                  >
+                    <span>{filt.icon}</span>
+                  </button>
+                ))}
+              </div>
+            )}
 
             <AnimatePresence>
               {showFlash && (
