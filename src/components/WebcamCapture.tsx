@@ -19,7 +19,35 @@ interface WebcamCaptureProps {
 }
 
 type CapturePhase = 'idle' | 'countdown' | 'flash' | 'intermission';
-type ARFilter = 'none' | 'cyber-mesh' | 'retro-shades' | 'heart-blush';
+type ARFilter = 'cyber-mesh' | 'aviators' | 'cyber-shades' | 'beauty-makeup' | 'heart-blush' | 'noise';
+
+// Pre-generate static noise patterns for fast tiling overlay
+let noiseCanvases: HTMLCanvasElement[] = [];
+function getNoiseCanvases() {
+  if (noiseCanvases.length > 0) return noiseCanvases;
+  if (typeof document === 'undefined') return [];
+  const NOISE_SIZE = 128;
+  for (let i = 0; i < 4; i++) {
+    const c = document.createElement('canvas');
+    c.width = NOISE_SIZE;
+    c.height = NOISE_SIZE;
+    const nCtx = c.getContext('2d');
+    if (nCtx) {
+      const imgData = nCtx.createImageData(NOISE_SIZE, NOISE_SIZE);
+      const data = imgData.data;
+      for (let j = 0; j < data.length; j += 4) {
+        const val = Math.floor(Math.random() * 255);
+        data[j] = val;
+        data[j+1] = val;
+        data[j+2] = val;
+        data[j+3] = 22; // subtle opacity for grain (approx 8.6%)
+      }
+      nCtx.putImageData(imgData, 0, 0);
+      noiseCanvases.push(c);
+    }
+  }
+  return noiseCanvases;
+}
 
 function drawPath(ctx: CanvasRenderingContext2D, landmarks: any[], indexes: number[], close = false) {
   if (landmarks.length === 0) return;
@@ -33,57 +61,26 @@ function drawPath(ctx: CanvasRenderingContext2D, landmarks: any[], indexes: numb
   ctx.stroke();
 }
 
-function drawFilters(ctx: CanvasRenderingContext2D, landmarks: any[], filter: ARFilter) {
-  if (filter === 'none') return;
+function drawFilters(
+  ctx: CanvasRenderingContext2D,
+  landmarks: any[],
+  activeFilters: ARFilter[],
+  images: { aviators: HTMLImageElement | null }
+) {
+  if (activeFilters.length === 0) return;
 
   ctx.save();
 
-  if (filter === 'cyber-mesh') {
-    // Cyberpunk Neon Mesh Outline
-    ctx.strokeStyle = 'rgba(0, 255, 204, 0.85)'; // Neon Teal
-    ctx.lineWidth = 1.5;
-    ctx.shadowColor = 'rgba(0, 255, 204, 0.6)';
-    ctx.shadowBlur = 6;
-
-    // Draw main contours
-    drawPath(ctx, landmarks, OVAL_INDEXES, true);
-    drawPath(ctx, landmarks, LIPS_INDEXES, true);
-    drawPath(ctx, landmarks, LEFT_EYE_INDEXES, true);
-    drawPath(ctx, landmarks, RIGHT_EYE_INDEXES, true);
-    drawPath(ctx, landmarks, LEFT_EYEBROW_INDEXES, false);
-    drawPath(ctx, landmarks, RIGHT_EYEBROW_INDEXES, false);
-    drawPath(ctx, landmarks, NOSE_INDEXES, false);
-
-    // Draw tracking nodes at key points
-    ctx.fillStyle = 'rgba(255, 0, 128, 0.9)'; // Neon Pink nodes
-    ctx.shadowColor = 'rgba(255, 0, 128, 0.8)';
-    const nodeIndexes = [10, 152, 130, 359, 168, 4, 308, 78]; // Forehead, chin, outer eyes, nose bridge, mouth corners
-    nodeIndexes.forEach(idx => {
-      const pt = landmarks[idx];
-      if (pt) {
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 3.5, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Draw little bracket/target crosshair overlay on eyes
-        if (idx === 130 || idx === 359) {
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
-          ctx.stroke();
-        }
-      }
-    });
-  }
-
-  if (filter === 'retro-shades') {
-    // Procedural Neon Y2K Cyber Visor / Glasses
+  // 1. Draw SVG Sunglasses Filters (Aviators)
+  if (activeFilters.includes('aviators')) {
     const noseBridge = landmarks[168];
     const leftEyeOuter = landmarks[130];
     const rightEyeOuter = landmarks[359];
 
-    if (noseBridge && leftEyeOuter && rightEyeOuter) {
+    const img = images.aviators;
+
+    if (noseBridge && leftEyeOuter && rightEyeOuter && img && img.complete) {
+      ctx.save();
       const dx = rightEyeOuter.x - leftEyeOuter.x;
       const dy = rightEyeOuter.y - leftEyeOuter.y;
       const angle = Math.atan2(dy, dx);
@@ -92,11 +89,43 @@ function drawFilters(ctx: CanvasRenderingContext2D, landmarks: any[], filter: AR
       ctx.translate(noseBridge.x, noseBridge.y);
       ctx.rotate(angle);
 
-      const w = eyeDistance * 1.95;
+      // Lower glasses significantly to fit perfectly over the eyes
+      ctx.translate(0, eyeDistance * 0.15);
+
+      // Width and Height scaled precisely to head dimensions (slightly narrower for premium look)
+      const w = eyeDistance * 1.8;
+      const h = w * 0.4;
+
+      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+      ctx.restore();
+    }
+  }
+
+  // 2. Draw Cyber Shades Filter (Procedural Neon Cyber Visor)
+  if (activeFilters.includes('cyber-shades')) {
+    const noseBridge = landmarks[168];
+    const leftEyeOuter = landmarks[130];
+    const rightEyeOuter = landmarks[359];
+
+    if (noseBridge && leftEyeOuter && rightEyeOuter) {
+      ctx.save();
+      const dx = rightEyeOuter.x - leftEyeOuter.x;
+      const dy = rightEyeOuter.y - leftEyeOuter.y;
+      const angle = Math.atan2(dy, dx);
+      const eyeDistance = Math.sqrt(dx * dx + dy * dy);
+
+      ctx.translate(noseBridge.x, noseBridge.y);
+      ctx.rotate(angle);
+
+      // Lift visor to align perfectly with the eyes
+      ctx.translate(0, eyeDistance * 0.07);
+
+      // Slightly smaller width and height for a perfect fit
+      const w = eyeDistance * 1.6;
       const h = w * 0.35;
 
       // Draw Visor Body
-      const gradient = ctx.createLinearGradient(0, -h/2, 0, h/2);
+      const gradient = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
       gradient.addColorStop(0, 'rgba(255, 0, 127, 0.85)'); // Hot Pink
       gradient.addColorStop(0.5, 'rgba(128, 0, 128, 0.7)'); // Deep Purple
       gradient.addColorStop(1, 'rgba(0, 0, 128, 0.85)'); // Midnight Blue
@@ -124,17 +153,18 @@ function drawFilters(ctx: CanvasRenderingContext2D, landmarks: any[], filter: AR
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
       ctx.lineWidth = 1;
       ctx.shadowBlur = 0; // Disable shadow for details
-      
-      // Horizontal scanlines
+
+      // Horizontal scanlines & diagonal slash (both clipped to visor shape)
       ctx.save();
       ctx.clip();
+      
       ctx.beginPath();
       for (let yOffset = -h; yOffset < h; yOffset += 6) {
         ctx.moveTo(-w, yOffset);
         ctx.lineTo(w, yOffset);
       }
       ctx.stroke();
-      
+
       // Cyber diagonal slash highlight
       const highlightGrad = ctx.createLinearGradient(-w * 0.3, 0, w * 0.3, 0);
       highlightGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
@@ -148,18 +178,120 @@ function drawFilters(ctx: CanvasRenderingContext2D, landmarks: any[], filter: AR
       ctx.lineTo(-w, h);
       ctx.closePath();
       ctx.fill();
-      ctx.restore();
+
+      ctx.restore(); // Restores clip state
+      ctx.restore(); // Restores translate/rotate state
     }
   }
 
-  if (filter === 'heart-blush') {
-    // Soft blush + procedurally drawn neon hearts on cheeks
+  // 3. Draw Cyber Mesh Filter
+  if (activeFilters.includes('cyber-mesh')) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0, 255, 204, 0.85)'; // Neon Teal
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = 'rgba(0, 255, 204, 0.6)';
+    ctx.shadowBlur = 6;
+
+    drawPath(ctx, landmarks, OVAL_INDEXES, true);
+    drawPath(ctx, landmarks, LIPS_INDEXES, true);
+    drawPath(ctx, landmarks, LEFT_EYE_INDEXES, true);
+    drawPath(ctx, landmarks, RIGHT_EYE_INDEXES, true);
+    drawPath(ctx, landmarks, LEFT_EYEBROW_INDEXES, false);
+    drawPath(ctx, landmarks, RIGHT_EYEBROW_INDEXES, false);
+    drawPath(ctx, landmarks, NOSE_INDEXES, false);
+
+    ctx.fillStyle = 'rgba(255, 0, 128, 0.9)'; // Neon Pink nodes
+    ctx.shadowColor = 'rgba(255, 0, 128, 0.8)';
+    const nodeIndexes = [10, 152, 130, 359, 168, 4, 308, 78];
+    nodeIndexes.forEach(idx => {
+      const pt = landmarks[idx];
+      if (pt) {
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (idx === 130 || idx === 359) {
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+    });
+    ctx.restore();
+  }
+
+  // 4. Draw Beauty Makeup Filter
+  if (activeFilters.includes('beauty-makeup')) {
+    ctx.save();
     const leftCheek = landmarks[205];
     const rightCheek = landmarks[425];
     const nose = landmarks[4];
     const forehead = landmarks[10];
 
-    // Calculate dynamic cheek circle radius based on face size
+    let faceSize = 50;
+    if (nose && forehead) {
+      faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.65;
+    }
+
+    // A. Skin Smoothing: Clip to face shape and apply soft blur overlay
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(landmarks[OVAL_INDEXES[0]].x, landmarks[OVAL_INDEXES[0]].y);
+    for (let i = 1; i < OVAL_INDEXES.length; i++) {
+      ctx.lineTo(landmarks[OVAL_INDEXES[i]].x, landmarks[OVAL_INDEXES[i]].y);
+    }
+    ctx.closePath();
+    ctx.clip();
+
+    ctx.globalAlpha = 0.38; // Soft blending
+    ctx.filter = 'blur(4.5px) saturate(102%) brightness(101%)';
+    ctx.drawImage(ctx.canvas, 0, 0);
+    ctx.restore();
+
+    // B. Blended Cheek Blush (Subtler, natural cosmetic pink/peach)
+    const drawBlendedBlush = (c_x: number, c_y: number, r: number) => {
+      const blushGrad = ctx.createRadialGradient(c_x, c_y, 0, c_x, c_y, r);
+      blushGrad.addColorStop(0, 'rgba(255, 80, 110, 0.11)'); // Decreased opacity
+      blushGrad.addColorStop(0.5, 'rgba(255, 80, 110, 0.03)');
+      blushGrad.addColorStop(1, 'rgba(255, 80, 110, 0)');
+
+      ctx.fillStyle = blushGrad;
+      ctx.beginPath();
+      ctx.arc(c_x, c_y, r, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
+    if (leftCheek) drawBlendedBlush(leftCheek.x, leftCheek.y, faceSize * 0.7); // Decreased size for natural look
+    if (rightCheek) drawBlendedBlush(rightCheek.x, rightCheek.y, faceSize * 0.7);
+
+    // C. Realistic Lip Gloss (Rose-red tint)
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(landmarks[LIPS_INDEXES[0]].x, landmarks[LIPS_INDEXES[0]].y);
+    for (let i = 1; i < LIPS_INDEXES.length; i++) {
+      ctx.lineTo(landmarks[LIPS_INDEXES[i]].x, landmarks[LIPS_INDEXES[i]].y);
+    }
+    ctx.closePath();
+
+    ctx.fillStyle = 'rgba(244, 63, 94, 0.14)'; // Translucent rose-tint
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(244, 63, 94, 0.2)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+    ctx.restore();
+  }
+
+  // 5. Draw Cute Heart Blush Filter
+  if (activeFilters.includes('heart-blush')) {
+    ctx.save();
+    const leftCheek = landmarks[205];
+    const rightCheek = landmarks[425];
+    const nose = landmarks[4];
+    const forehead = landmarks[10];
+
     let faceSize = 60;
     if (nose && forehead) {
       faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.6;
@@ -170,23 +302,10 @@ function drawFilters(ctx: CanvasRenderingContext2D, landmarks: any[], filter: AR
       ctx.beginPath();
       const topCurveHeight = size * 0.3;
       ctx.moveTo(c_x, c_y + topCurveHeight);
-      
-      // Left side curve
-      ctx.bezierCurveTo(
-        c_x - size / 2, c_y - topCurveHeight / 2,
-        c_x - size / 2, c_y + topCurveHeight,
-        c_x, c_y + size
-      );
-      
-      // Right side curve
-      ctx.bezierCurveTo(
-        c_x + size / 2, c_y + topCurveHeight,
-        c_x + size / 2, c_y - topCurveHeight / 2,
-        c_x, c_y + topCurveHeight
-      );
-      
+      ctx.bezierCurveTo(c_x - size / 2, c_y - topCurveHeight / 2, c_x - size / 2, c_y + topCurveHeight, c_x, c_y + size);
+      ctx.bezierCurveTo(c_x + size / 2, c_y + topCurveHeight, c_x + size / 2, c_y - topCurveHeight / 2, c_x, c_y + topCurveHeight);
       ctx.closePath();
-      ctx.fillStyle = 'rgba(255, 51, 153, 0.85)'; // Neon Pink
+      ctx.fillStyle = 'rgba(255, 51, 153, 0.85)';
       ctx.shadowColor = 'rgba(255, 51, 153, 0.8)';
       ctx.shadowBlur = 10;
       ctx.fill();
@@ -198,7 +317,7 @@ function drawFilters(ctx: CanvasRenderingContext2D, landmarks: any[], filter: AR
       blushGrad.addColorStop(0, 'rgba(255, 105, 180, 0.55)');
       blushGrad.addColorStop(0.5, 'rgba(255, 105, 180, 0.2)');
       blushGrad.addColorStop(1, 'rgba(255, 105, 180, 0)');
-      
+
       ctx.fillStyle = blushGrad;
       ctx.beginPath();
       ctx.arc(c_x, c_y, r, 0, Math.PI * 2);
@@ -213,6 +332,7 @@ function drawFilters(ctx: CanvasRenderingContext2D, landmarks: any[], filter: AR
       drawSoftBlush(rightCheek.x, rightCheek.y, faceSize);
       drawHeart(rightCheek.x, rightCheek.y - faceSize * 0.35, faceSize * 0.55);
     }
+    ctx.restore();
   }
 
   ctx.restore();
@@ -230,7 +350,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
   const [permissionState, setPermissionState] = useState<'prompt' | 'granted' | 'denied'>('prompt');
   const [errorMessage, setErrorMessage] = useState('');
   const [isModelLoading, setIsModelLoading] = useState(true);
-  const [arFilter, setArFilter] = useState<ARFilter>('none');
+  const [activeFilters, setActiveFilters] = useState<ARFilter[]>([]);
   const [hasLandmarker, setHasLandmarker] = useState(false);
 
   const [phase, setPhase] = useState<CapturePhase>('idle');
@@ -243,6 +363,18 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
   const [photosTaken, setPhotosTaken] = useState<string[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Pre-loaded SVG glasses images
+  const filterImagesRef = useRef<{ aviators: HTMLImageElement | null }>({
+    aviators: null
+  });
+
+  // Preload SVG assets on mount
+  useEffect(() => {
+    const img1 = new Image();
+    img1.src = '/filters/aviators.svg';
+    filterImagesRef.current.aviators = img1;
+  }, []);
 
   // Initialize MediaPipe FaceLandmarker
   useEffect(() => {
@@ -398,13 +530,29 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
         // Render AR Filters using cached landmarks (ELIMINATES FLICKERING)
         const cachedLandmarks = lastLandmarksRef.current;
         const dims = lastDimensionsRef.current;
-        if (cachedLandmarks && dims.width > 0 && dims.height > 0 && arFilter !== 'none') {
+        if (cachedLandmarks && dims.width > 0 && dims.height > 0 && activeFilters.length > 0) {
           const mappedLandmarks = cachedLandmarks.map((pt: any) => {
             const x_pixel = ((pt.x * dims.width) - sx) / sWidth * targetW;
             const y_pixel = ((pt.y * dims.height) - sy) / sHeight * targetH;
             return { x: x_pixel, y: y_pixel, z: pt.z };
           });
-          drawFilters(ctx, mappedLandmarks, arFilter);
+          drawFilters(ctx, mappedLandmarks, activeFilters, filterImagesRef.current);
+        }
+
+        // Draw Screen Overlays (e.g. Noise filter) that do not depend on landmarks
+        if (activeFilters.includes('noise')) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'source-over';
+          const canvases = getNoiseCanvases();
+          if (canvases.length > 0) {
+            const noiseCanvas = canvases[Math.floor(Math.random() * canvases.length)];
+            const pattern = ctx.createPattern(noiseCanvas, 'repeat');
+            if (pattern) {
+              ctx.fillStyle = pattern;
+              ctx.fillRect(0, 0, targetW, targetH);
+            }
+          }
+          ctx.restore();
         }
       }
 
@@ -416,7 +564,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
     return () => {
       cancelAnimationFrame(animationId);
     };
-  }, [arFilter, hasLandmarker]);
+  }, [activeFilters, hasLandmarker]);
 
   const captureFrame = useCallback((): string | null => {
     const canvas = canvasRef.current;
@@ -576,31 +724,65 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
               <div className="absolute inset-0 bg-scanlines pointer-events-none opacity-[0.03]" />
             </div>
 
-            {/* Snapchat-Style AR Filter Lenses */}
-            {!isActive && !isModelLoading && hasLandmarker && (
-              <div className="absolute bottom-16 left-0 right-0 flex justify-center gap-3 z-30">
+            {/* Snapchat-Style AR Filter Lenses (Interactive in idle and photoshoot intermission) */}
+            {(phase === 'idle' || phase === 'intermission') && !isModelLoading && hasLandmarker && (
+              <div className="absolute bottom-16 left-0 right-0 flex justify-center gap-3 z-50">
                 {[
                   { id: 'none', label: 'Off', icon: '🚫' },
+                  { id: 'beauty-makeup', label: 'Beauty', icon: '✨' },
                   { id: 'cyber-mesh', label: 'Mesh', icon: '🧬' },
-                  { id: 'retro-shades', label: 'Shades', icon: '🕶️' },
-                  { id: 'heart-blush', label: 'Blush', icon: '💖' },
-                ].map((filt) => (
-                  <button
-                    key={filt.id}
-                    onClick={() => {
-                      playClick();
-                      setArFilter(filt.id as ARFilter);
-                    }}
-                    title={filt.label}
-                    className={`w-12 h-12 rounded-full border-2 flex flex-col items-center justify-center text-xl transition-all shadow-neo-sm hover:scale-105 active:scale-95 cursor-pointer z-30 ${
-                      arFilter === filt.id
-                        ? 'bg-pastelpink-300 text-cream-900 border-cream-900 scale-110 shadow-none translate-y-[2px] ring-2 ring-white/50'
-                        : 'bg-cream-50/90 text-cream-800 border-cream-900 hover:bg-pastelpink-50'
-                    }`}
-                  >
-                    <span>{filt.icon}</span>
-                  </button>
-                ))}
+                  { id: 'cyber-shades', label: 'Shades', icon: '🕶️' },
+                  { id: 'aviators', label: 'Aviator', icon: '👓' },
+                  { id: 'heart-blush', label: 'Hearts', icon: '💖' },
+                  { id: 'noise', label: 'Noise', icon: '📺' },
+                ].map((filt) => {
+                  const isSelected = filt.id === 'none'
+                    ? activeFilters.length === 0
+                    : activeFilters.includes(filt.id as ARFilter);
+
+                  return (
+                    <button
+                      key={filt.id}
+                      onClick={() => {
+                        playClick();
+                        if (filt.id === 'none') {
+                          setActiveFilters([]);
+                        } else {
+                          const targetId = filt.id as ARFilter;
+                          setActiveFilters((prev) => {
+                            if (prev.includes(targetId)) {
+                              return prev.filter((id) => id !== targetId);
+                            } else {
+                              let updated = [...prev];
+                              // Eyewear mutual exclusion
+                              if (targetId === 'aviators') {
+                                updated = updated.filter((id) => id !== 'cyber-shades');
+                              } else if (targetId === 'cyber-shades') {
+                                updated = updated.filter((id) => id !== 'aviators');
+                              }
+                              // Blush mutual exclusion
+                              if (targetId === 'beauty-makeup') {
+                                updated = updated.filter((id) => id !== 'heart-blush');
+                              } else if (targetId === 'heart-blush') {
+                                updated = updated.filter((id) => id !== 'beauty-makeup');
+                              }
+                              updated.push(targetId);
+                              return updated;
+                            }
+                          });
+                        }
+                      }}
+                      title={filt.label}
+                      className={`w-12 h-12 flex-shrink-0 rounded-full border-2 flex flex-col items-center justify-center text-xl transition-all shadow-neo-sm hover:scale-105 active:scale-95 cursor-pointer z-50 ${
+                        isSelected
+                          ? 'bg-pastelpink-300 text-cream-900 border-cream-900 scale-110 shadow-none translate-y-[2px] ring-2 ring-white/50'
+                          : 'bg-cream-50/90 text-cream-800 border-cream-900 hover:bg-pastelpink-50'
+                      }`}
+                    >
+                      <span>{filt.icon}</span>
+                    </button>
+                  );
+                })}
               </div>
             )}
 

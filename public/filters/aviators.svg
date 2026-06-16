@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 200" width="500" height="200">
+  <defs>
+    <!-- Gold Frame Gradient -->
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFE0B2"/>
+      <stop offset="50%" stop-color="#FFB74D"/>
+      <stop offset="100%" stop-color="#FFA726"/>
+    </linearGradient>
+    <!-- Lens Gradient -->
+    <linearGradient id="lens" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#212121" stop-opacity="0.95"/>
+      <stop offset="70%" stop-color="#3c3c3c" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#555555" stop-opacity="0.75"/>
+    </linearGradient>
+    <!-- Reflection Highlight Gradient -->
+    <linearGradient id="highlight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.55"/>
+      <stop offset="30%" stop-color="#FFFFFF" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- Left Lens -->
+  <path d="M 60 85 C 60 45, 175 35, 215 85 C 225 115, 195 165, 145 165 C 95 165, 60 125, 60 85 Z" fill="url(#lens)" stroke="url(#gold)" stroke-width="5"/>
+  <!-- Left Reflection -->
+  <path d="M 80 85 C 80 65, 140 55, 170 85 C 150 95, 100 95, 80 85 Z" fill="url(#highlight)"/>
+  
+  <!-- Right Lens -->
+  <path d="M 440 85 C 440 45, 325 35, 285 85 C 275 115, 305 165, 355 165 C 405 165, 440 125, 440 85 Z" fill="url(#lens)" stroke="url(#gold)" stroke-width="5"/>
+  <!-- Right Reflection -->
+  <path d="M 330 85 C 330 65, 390 55, 420 85 C 400 95, 350 95, 330 85 Z" fill="url(#highlight)"/>
+
+  <!-- Bridge -->
+  <path d="M 210 75 Q 250 62 290 75" fill="none" stroke="url(#gold)" stroke-width="6"/>
+  <path d="M 215 86 Q 250 78 285 86" fill="none" stroke="url(#gold)" stroke-width="3.5"/>
+
+  <!-- Temples (Sides) -->
+  <path d="M 60 85 L 20 80" fill="none" stroke="url(#gold)" stroke-width="4.5"/>
+  <path d="M 440 85 L 480 80" fill="none" stroke="url(#gold)" stroke-width="4.5"/>
+</svg>
