@@ -6,11 +6,6 @@ import { playBeep, playShutter, playClick } from '../utils/audioEngine';
 // MediaPipe facial landmark connections for procedural drawing
 const OVAL_INDEXES = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
 const LIPS_INDEXES = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95, 78];
-const LEFT_EYE_INDEXES = [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466];
-const RIGHT_EYE_INDEXES = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246];
-const LEFT_EYEBROW_INDEXES = [276, 283, 282, 295, 285, 336, 296, 334, 293, 300];
-const RIGHT_EYEBROW_INDEXES = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
-const NOSE_INDEXES = [168, 6, 197, 195, 5, 4, 1, 19, 94, 2];
 
 interface WebcamCaptureProps {
   onCaptureComplete: (photos: string[]) => void;
@@ -19,7 +14,7 @@ interface WebcamCaptureProps {
 }
 
 type CapturePhase = 'idle' | 'countdown' | 'flash' | 'intermission';
-type ARFilter = 'cyber-mesh' | 'aviators' | 'cyber-shades' | 'beauty-makeup' | 'heart-blush' | 'macbook-hearts' | 'noise';
+type ARFilter = 'aviators' | 'cyber-shades' | 'beauty-makeup' | 'heart-blush' | 'macbook-hearts' | 'noise';
 
 // Pre-generate static noise patterns for fast tiling overlay
 let noiseCanvases: HTMLCanvasElement[] = [];
@@ -49,17 +44,7 @@ function getNoiseCanvases() {
   return noiseCanvases;
 }
 
-function drawPath(ctx: CanvasRenderingContext2D, landmarks: any[], indexes: number[], close = false) {
-  if (landmarks.length === 0) return;
-  ctx.beginPath();
-  ctx.moveTo(landmarks[indexes[0]].x, landmarks[indexes[0]].y);
-  for (let i = 1; i < indexes.length; i++) {
-    const pt = landmarks[indexes[i]];
-    if (pt) ctx.lineTo(pt.x, pt.y);
-  }
-  if (close) ctx.closePath();
-  ctx.stroke();
-}
+
 
 function drawHeart(
   ctx: CanvasRenderingContext2D,
@@ -214,44 +199,6 @@ function drawFilters(
       ctx.restore(); // Restores clip state
       ctx.restore(); // Restores translate/rotate state
     }
-  }
-
-  // 3. Draw Cyber Mesh Filter
-  if (activeFilters.includes('cyber-mesh')) {
-    ctx.save();
-    ctx.strokeStyle = 'rgba(0, 255, 204, 0.85)'; // Neon Teal
-    ctx.lineWidth = 1.5;
-    ctx.shadowColor = 'rgba(0, 255, 204, 0.6)';
-    ctx.shadowBlur = 6;
-
-    drawPath(ctx, landmarks, OVAL_INDEXES, true);
-    drawPath(ctx, landmarks, LIPS_INDEXES, true);
-    drawPath(ctx, landmarks, LEFT_EYE_INDEXES, true);
-    drawPath(ctx, landmarks, RIGHT_EYE_INDEXES, true);
-    drawPath(ctx, landmarks, LEFT_EYEBROW_INDEXES, false);
-    drawPath(ctx, landmarks, RIGHT_EYEBROW_INDEXES, false);
-    drawPath(ctx, landmarks, NOSE_INDEXES, false);
-
-    ctx.fillStyle = 'rgba(255, 0, 128, 0.9)'; // Neon Pink nodes
-    ctx.shadowColor = 'rgba(255, 0, 128, 0.8)';
-    const nodeIndexes = [10, 152, 130, 359, 168, 4, 308, 78];
-    nodeIndexes.forEach(idx => {
-      const pt = landmarks[idx];
-      if (pt) {
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 3.5, 0, Math.PI * 2);
-        ctx.fill();
-
-        if (idx === 130 || idx === 359) {
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
-          ctx.stroke();
-        }
-      }
-    });
-    ctx.restore();
   }
 
   // 4. Draw Beauty Makeup Filter
@@ -829,7 +776,6 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
                 {[
                   { id: 'none', label: 'Off', icon: '🚫' },
                   { id: 'beauty-makeup', label: 'Beauty', icon: '✨' },
-                  { id: 'cyber-mesh', label: 'Mesh', icon: '🧬' },
                   { id: 'cyber-shades', label: 'Shades', icon: '🕶️' },
                   { id: 'aviators', label: 'Aviator', icon: '👓' },
                   { id: 'heart-blush', label: 'Hearts', icon: '💖' },
