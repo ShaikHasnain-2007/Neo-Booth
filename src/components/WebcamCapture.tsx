@@ -60,12 +60,18 @@ function drawHeart(
   ctx.translate(c_x, c_y);
   ctx.rotate(rotation);
   
+  const r = size / 2;
   ctx.beginPath();
-  const yOffset = -size * 0.5; // Center the heart vertically
-  const topCurveHeight = size * 0.3;
-  ctx.moveTo(0, yOffset + topCurveHeight);
-  ctx.bezierCurveTo(-size / 2, yOffset - topCurveHeight / 2, -size / 2, yOffset + topCurveHeight, 0, yOffset + size);
-  ctx.bezierCurveTo(size / 2, yOffset + topCurveHeight, size / 2, yOffset - topCurveHeight / 2, 0, yOffset + topCurveHeight);
+  ctx.moveTo(0, -r * 0.3);
+  
+  // Left half (smooth curves like standard emoji ❤️)
+  ctx.bezierCurveTo(-r * 0.5, -r * 0.85, -r, -r * 0.4, -r, r * 0.1);
+  ctx.bezierCurveTo(-r, r * 0.45, -r * 0.45, r * 0.85, 0, r);
+  
+  // Right half (smooth curves like standard emoji ❤️)
+  ctx.bezierCurveTo(r * 0.45, r * 0.85, r, r * 0.45, r, r * 0.1);
+  ctx.bezierCurveTo(r, -r * 0.4, r * 0.5, -r * 0.85, 0, -r * 0.3);
+  
   ctx.closePath();
 
   ctx.fillStyle = fillStyle;
@@ -423,7 +429,7 @@ function drawFilters(
           x: hand_x,
           y: hand_y,
           speed: 1.8 + Math.random() * 0.8, // gentle upward float speed (pixels per frame)
-          size: handSize * (2.2 + Math.random() * 0.4), // solid hand-sized heart (proportional to hands size, made big!)
+          size: handSize * (0.85 + Math.random() * 0.15), // solid hand-sized heart (proportional to hands size)
           opacity: 1.0,
           colorHue: 345, // Wine red hue base
           wobbleSpeed: 0.02 + Math.random() * 0.02,
