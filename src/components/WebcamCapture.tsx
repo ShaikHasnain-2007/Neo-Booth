@@ -376,7 +376,7 @@ function drawFilters(
           p.scale = Math.max(0.1, p.scale - 0.05);
         }
 
-        p.opacity -= 0.014; // slightly faster fade to match faster speed
+        p.opacity -= 0.018; // faster fade to match higher floating speed
       });
 
       // Filter out dead particles
@@ -387,7 +387,7 @@ function drawFilters(
         floatingHeartsRef.current.push({
           xOffsetFactor: (Math.random() - 0.5) * 3.4, // much wider horizontal spread over forehead
           yOffsetFactor: -0.4 - Math.random() * 0.25, // spawn clearly above the forehead/hair
-          speedFactor: 0.015 + Math.random() * 0.018, // increased upward speed
+          speedFactor: 0.024 + Math.random() * 0.022, // further increased upward speed
           sizeFactor: 0.35 + Math.random() * 0.18, // large heart sizes matching snapchat profile
           opacity: 1.0,
           colorHue: 320 + Math.floor(Math.random() * 32), // Pink-Magenta spectrum HSL (320-352)
