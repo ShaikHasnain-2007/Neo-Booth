@@ -408,8 +408,8 @@ function drawFilters(
         const size = p.sizeFactor * faceSize * p.scale;
 
         // Render soft, translucent pink overlays matching snapchat's aesthetic
-        const fillStyle = `hsla(${p.colorHue}, 100%, 68%, ${p.opacity * 0.55})`;
-        const shadowColor = `hsla(${p.colorHue}, 100%, 68%, ${p.opacity * 0.35})`;
+        const fillStyle = `hsla(${p.colorHue}, 100%, 68%, ${p.opacity * 0.70})`;
+        const shadowColor = `hsla(${p.colorHue}, 100%, 68%, ${p.opacity * 0.50})`;
         
         drawHeart(ctx, c_x, c_y, size, fillStyle, shadowColor, 8, p.rotation);
       });
