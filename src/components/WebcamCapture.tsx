@@ -82,288 +82,395 @@ function drawFilters(
   landmarks: any[],
   activeFilters: ARFilter[],
   images: { aviators: HTMLImageElement | null },
-  floatingHeartsRef: React.MutableRefObject<any[]>
+  floatingHeartsRef: React.MutableRefObject<any[]>,
+  lastHandHeartSpawnTimeRef: React.MutableRefObject<number>,
+  rawHandmarks: any[][] | null,
+  dims: { width: number; height: number },
+  crop: { sx: number; sy: number; sWidth: number; sHeight: number; targetW: number; targetH: number }
 ) {
-  if (activeFilters.length === 0) return;
-
   ctx.save();
 
-  // 1. Draw SVG Sunglasses Filters (Aviators)
-  if (activeFilters.includes('aviators')) {
-    const noseBridge = landmarks[168];
-    const leftEyeOuter = landmarks[130];
-    const rightEyeOuter = landmarks[359];
+  // Draw selected face filters
+  if (activeFilters.length > 0 && landmarks.length > 0) {
+    // 1. Draw SVG Sunglasses Filters (Aviators)
+    if (activeFilters.includes('aviators')) {
+      const noseBridge = landmarks[168];
+      const leftEyeOuter = landmarks[130];
+      const rightEyeOuter = landmarks[359];
 
-    const img = images.aviators;
+      const img = images.aviators;
 
-    if (noseBridge && leftEyeOuter && rightEyeOuter && img && img.complete) {
+      if (noseBridge && leftEyeOuter && rightEyeOuter && img && img.complete) {
+        ctx.save();
+        const dx = rightEyeOuter.x - leftEyeOuter.x;
+        const dy = rightEyeOuter.y - leftEyeOuter.y;
+        const angle = Math.atan2(dy, dx);
+        const eyeDistance = Math.sqrt(dx * dx + dy * dy);
+
+        ctx.translate(noseBridge.x, noseBridge.y);
+        ctx.rotate(angle);
+
+        // Lower glasses significantly to fit perfectly over the eyes
+        ctx.translate(0, eyeDistance * 0.15);
+
+        // Width and Height scaled precisely to head dimensions
+        const w = eyeDistance * 1.8;
+        const h = w * 0.4;
+
+        ctx.drawImage(img, -w / 2, -h / 2, w, h);
+        ctx.restore();
+      }
+    }
+
+    // 2. Draw Cyber Shades Filter (Procedural Neon Cyber Visor)
+    if (activeFilters.includes('cyber-shades')) {
+      const noseBridge = landmarks[168];
+      const leftEyeOuter = landmarks[130];
+      const rightEyeOuter = landmarks[359];
+
+      if (noseBridge && leftEyeOuter && rightEyeOuter) {
+        ctx.save();
+        const dx = rightEyeOuter.x - leftEyeOuter.x;
+        const dy = rightEyeOuter.y - leftEyeOuter.y;
+        const angle = Math.atan2(dy, dx);
+        const eyeDistance = Math.sqrt(dx * dx + dy * dy);
+
+        ctx.translate(noseBridge.x, noseBridge.y);
+        ctx.rotate(angle);
+
+        // Lift visor to align perfectly with the eyes
+        ctx.translate(0, eyeDistance * 0.07);
+
+        // Slightly smaller width and height for a perfect fit
+        const w = eyeDistance * 1.6;
+        const h = w * 0.35;
+
+        // Draw Visor Body
+        const gradient = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+        gradient.addColorStop(0, 'rgba(255, 0, 128, 0.85)'); // Hot Pink
+        gradient.addColorStop(0.5, 'rgba(128, 0, 128, 0.7)'); // Deep Purple
+        gradient.addColorStop(1, 'rgba(0, 0, 128, 0.85)'); // Midnight Blue
+
+        ctx.fillStyle = gradient;
+        ctx.strokeStyle = 'rgba(0, 255, 204, 0.9)'; // Neon Teal Border
+        ctx.lineWidth = 3.5;
+        ctx.shadowColor = 'rgba(0, 255, 204, 0.8)';
+        ctx.shadowBlur = 10;
+
+        // Draw custom angular shape for Y2K visor
+        ctx.beginPath();
+        ctx.moveTo(-w * 0.5, -h * 0.4); // Top-left
+        ctx.lineTo(w * 0.5, -h * 0.4);  // Top-right
+        ctx.lineTo(w * 0.45, h * 0.4);  // Bottom-right
+        ctx.lineTo(w * 0.1, h * 0.4);   // Nose notch right
+        ctx.lineTo(0, h * 0.15);         // Nose notch top center
+        ctx.lineTo(-w * 0.1, h * 0.4);  // Nose notch left
+        ctx.lineTo(-w * 0.45, h * 0.4); // Bottom-left
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Draw cool tech HUD details on visor
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.shadowBlur = 0; // Disable shadow for details
+
+        // Horizontal scanlines & diagonal slash (both clipped to visor shape)
+        ctx.save();
+        ctx.clip();
+        
+        ctx.beginPath();
+        for (let yOffset = -h; yOffset < h; yOffset += 6) {
+          ctx.moveTo(-w, yOffset);
+          ctx.lineTo(w, yOffset);
+        }
+        ctx.stroke();
+
+        // Cyber diagonal slash highlight
+        const highlightGrad = ctx.createLinearGradient(-w * 0.3, 0, w * 0.3, 0);
+        highlightGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+        highlightGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.3)');
+        highlightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = highlightGrad;
+        ctx.beginPath();
+        ctx.moveTo(-w, -h);
+        ctx.lineTo(-w * 0.2, -h);
+        ctx.lineTo(w * 0.2, h);
+        ctx.lineTo(-w, h);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.restore(); // Restores clip state
+        ctx.restore(); // Restores translate/rotate state
+      }
+    }
+
+    // 4. Draw Beauty Makeup Filter
+    if (activeFilters.includes('beauty-makeup')) {
+      const leftCheek = landmarks[205];
+      const rightCheek = landmarks[425];
+      const nose = landmarks[4];
+      const forehead = landmarks[10];
+
+      let faceSize = 50;
+      if (nose && forehead) {
+        faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.65;
+      }
+
+      // A. Skin Smoothing: Clip to face shape and apply soft blur overlay
       ctx.save();
-      const dx = rightEyeOuter.x - leftEyeOuter.x;
-      const dy = rightEyeOuter.y - leftEyeOuter.y;
-      const angle = Math.atan2(dy, dx);
-      const eyeDistance = Math.sqrt(dx * dx + dy * dy);
+      ctx.beginPath();
+      ctx.moveTo(landmarks[OVAL_INDEXES[0]].x, landmarks[OVAL_INDEXES[0]].y);
+      for (let i = 1; i < OVAL_INDEXES.length; i++) {
+        ctx.lineTo(landmarks[OVAL_INDEXES[i]].x, landmarks[OVAL_INDEXES[i]].y);
+      }
+      ctx.closePath();
+      ctx.clip();
 
-      ctx.translate(noseBridge.x, noseBridge.y);
-      ctx.rotate(angle);
+      ctx.globalAlpha = 0.38; // Soft blending
+      ctx.filter = 'blur(4.5px) saturate(102%) brightness(101%)';
+      ctx.drawImage(ctx.canvas, 0, 0);
+      ctx.restore();
 
-      // Lower glasses significantly to fit perfectly over the eyes
-      ctx.translate(0, eyeDistance * 0.15);
+      // B. Blended Cheek Blush
+      const drawBlendedBlush = (c_x: number, c_y: number, r: number) => {
+        const blushGrad = ctx.createRadialGradient(c_x, c_y, 0, c_x, c_y, r);
+        blushGrad.addColorStop(0, 'rgba(255, 80, 110, 0.11)');
+        blushGrad.addColorStop(0.5, 'rgba(255, 80, 110, 0.03)');
+        blushGrad.addColorStop(1, 'rgba(255, 80, 110, 0)');
 
-      // Width and Height scaled precisely to head dimensions (slightly narrower for premium look)
-      const w = eyeDistance * 1.8;
-      const h = w * 0.4;
+        ctx.fillStyle = blushGrad;
+        ctx.beginPath();
+        ctx.arc(c_x, c_y, r, 0, Math.PI * 2);
+        ctx.fill();
+      };
 
-      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+      if (leftCheek) drawBlendedBlush(leftCheek.x, leftCheek.y, faceSize * 0.7);
+      if (rightCheek) drawBlendedBlush(rightCheek.x, rightCheek.y, faceSize * 0.7);
+
+      // C. Realistic Lip Gloss (Rose-red tint)
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(landmarks[LIPS_INDEXES[0]].x, landmarks[LIPS_INDEXES[0]].y);
+      for (let i = 1; i < LIPS_INDEXES.length; i++) {
+        ctx.lineTo(landmarks[LIPS_INDEXES[i]].x, landmarks[LIPS_INDEXES[i]].y);
+      }
+      ctx.closePath();
+
+      ctx.fillStyle = 'rgba(244, 63, 94, 0.14)'; // Translucent rose-tint
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(244, 63, 94, 0.2)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
       ctx.restore();
     }
-  }
 
-  // 2. Draw Cyber Shades Filter (Procedural Neon Cyber Visor)
-  if (activeFilters.includes('cyber-shades')) {
-    const noseBridge = landmarks[168];
-    const leftEyeOuter = landmarks[130];
-    const rightEyeOuter = landmarks[359];
+    // 5. Draw Cute Heart Blush Filter
+    if (activeFilters.includes('heart-blush')) {
+      const leftCheek = landmarks[205];
+      const rightCheek = landmarks[425];
+      const nose = landmarks[4];
+      const forehead = landmarks[10];
 
-    if (noseBridge && leftEyeOuter && rightEyeOuter) {
-      ctx.save();
-      const dx = rightEyeOuter.x - leftEyeOuter.x;
-      const dy = rightEyeOuter.y - leftEyeOuter.y;
-      const angle = Math.atan2(dy, dx);
-      const eyeDistance = Math.sqrt(dx * dx + dy * dy);
-
-      ctx.translate(noseBridge.x, noseBridge.y);
-      ctx.rotate(angle);
-
-      // Lift visor to align perfectly with the eyes
-      ctx.translate(0, eyeDistance * 0.07);
-
-      // Slightly smaller width and height for a perfect fit
-      const w = eyeDistance * 1.6;
-      const h = w * 0.35;
-
-      // Draw Visor Body
-      const gradient = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
-      gradient.addColorStop(0, 'rgba(255, 0, 127, 0.85)'); // Hot Pink
-      gradient.addColorStop(0.5, 'rgba(128, 0, 128, 0.7)'); // Deep Purple
-      gradient.addColorStop(1, 'rgba(0, 0, 128, 0.85)'); // Midnight Blue
-
-      ctx.fillStyle = gradient;
-      ctx.strokeStyle = 'rgba(0, 255, 204, 0.9)'; // Neon Teal Border
-      ctx.lineWidth = 3.5;
-      ctx.shadowColor = 'rgba(0, 255, 204, 0.8)';
-      ctx.shadowBlur = 10;
-
-      // Draw custom angular shape for Y2K visor
-      ctx.beginPath();
-      ctx.moveTo(-w * 0.5, -h * 0.4); // Top-left
-      ctx.lineTo(w * 0.5, -h * 0.4);  // Top-right
-      ctx.lineTo(w * 0.45, h * 0.4);  // Bottom-right
-      ctx.lineTo(w * 0.1, h * 0.4);   // Nose notch right
-      ctx.lineTo(0, h * 0.15);         // Nose notch top center
-      ctx.lineTo(-w * 0.1, h * 0.4);  // Nose notch left
-      ctx.lineTo(-w * 0.45, h * 0.4); // Bottom-left
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      // Draw cool tech HUD details on visor
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-      ctx.lineWidth = 1;
-      ctx.shadowBlur = 0; // Disable shadow for details
-
-      // Horizontal scanlines & diagonal slash (both clipped to visor shape)
-      ctx.save();
-      ctx.clip();
-      
-      ctx.beginPath();
-      for (let yOffset = -h; yOffset < h; yOffset += 6) {
-        ctx.moveTo(-w, yOffset);
-        ctx.lineTo(w, yOffset);
+      let faceSize = 60;
+      if (nose && forehead) {
+        faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.6;
       }
-      ctx.stroke();
 
-      // Cyber diagonal slash highlight
-      const highlightGrad = ctx.createLinearGradient(-w * 0.3, 0, w * 0.3, 0);
-      highlightGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-      highlightGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.3)');
-      highlightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-      ctx.fillStyle = highlightGrad;
-      ctx.beginPath();
-      ctx.moveTo(-w, -h);
-      ctx.lineTo(-w * 0.2, -h);
-      ctx.lineTo(w * 0.2, h);
-      ctx.lineTo(-w, h);
-      ctx.closePath();
-      ctx.fill();
+      const drawSoftBlush = (c_x: number, c_y: number, r: number) => {
+        const blushGrad = ctx.createRadialGradient(c_x, c_y, 0, c_x, c_y, r);
+        blushGrad.addColorStop(0, 'rgba(255, 105, 180, 0.55)');
+        blushGrad.addColorStop(0.5, 'rgba(255, 105, 180, 0.2)');
+        blushGrad.addColorStop(1, 'rgba(255, 105, 180, 0)');
 
-      ctx.restore(); // Restores clip state
-      ctx.restore(); // Restores translate/rotate state
+        ctx.fillStyle = blushGrad;
+        ctx.beginPath();
+        ctx.arc(c_x, c_y, r, 0, Math.PI * 2);
+        ctx.fill();
+      };
+
+      if (leftCheek) {
+        drawSoftBlush(leftCheek.x, leftCheek.y, faceSize);
+        drawHeart(ctx, leftCheek.x, leftCheek.y - faceSize * 0.35, faceSize * 0.55, 'rgba(255, 51, 153, 0.85)', 'rgba(255, 51, 153, 0.8)', 10);
+      }
+      if (rightCheek) {
+        drawSoftBlush(rightCheek.x, rightCheek.y, faceSize);
+        drawHeart(ctx, rightCheek.x, rightCheek.y - faceSize * 0.35, faceSize * 0.55, 'rgba(255, 51, 153, 0.85)', 'rgba(255, 51, 153, 0.8)', 10);
+      }
     }
   }
 
-  // 4. Draw Beauty Makeup Filter
-  if (activeFilters.includes('beauty-makeup')) {
-    ctx.save();
-    const leftCheek = landmarks[205];
-    const rightCheek = landmarks[425];
-    const nose = landmarks[4];
-    const forehead = landmarks[10];
+  // ALWAYS Draw & Update Floating Hearts Particle System (Forehead loop and Hand gestures)
+  const forehead = landmarks.length > 0 ? landmarks[10] : null;
+  const nose = landmarks.length > 0 ? landmarks[4] : null;
+  const faceSize = forehead && nose
+    ? Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.6
+    : 80; // fallback face size in pixels
 
-    let faceSize = 50;
-    if (nose && forehead) {
-      faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.65;
-    }
-
-    // A. Skin Smoothing: Clip to face shape and apply soft blur overlay
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(landmarks[OVAL_INDEXES[0]].x, landmarks[OVAL_INDEXES[0]].y);
-    for (let i = 1; i < OVAL_INDEXES.length; i++) {
-      ctx.lineTo(landmarks[OVAL_INDEXES[i]].x, landmarks[OVAL_INDEXES[i]].y);
-    }
-    ctx.closePath();
-    ctx.clip();
-
-    ctx.globalAlpha = 0.38; // Soft blending
-    ctx.filter = 'blur(4.5px) saturate(102%) brightness(101%)';
-    ctx.drawImage(ctx.canvas, 0, 0);
-    ctx.restore();
-
-    // B. Blended Cheek Blush (Subtler, natural cosmetic pink/peach)
-    const drawBlendedBlush = (c_x: number, c_y: number, r: number) => {
-      const blushGrad = ctx.createRadialGradient(c_x, c_y, 0, c_x, c_y, r);
-      blushGrad.addColorStop(0, 'rgba(255, 80, 110, 0.11)'); // Decreased opacity
-      blushGrad.addColorStop(0.5, 'rgba(255, 80, 110, 0.03)');
-      blushGrad.addColorStop(1, 'rgba(255, 80, 110, 0)');
-
-      ctx.fillStyle = blushGrad;
-      ctx.beginPath();
-      ctx.arc(c_x, c_y, r, 0, Math.PI * 2);
-      ctx.fill();
-    };
-
-    if (leftCheek) drawBlendedBlush(leftCheek.x, leftCheek.y, faceSize * 0.7); // Decreased size for natural look
-    if (rightCheek) drawBlendedBlush(rightCheek.x, rightCheek.y, faceSize * 0.7);
-
-    // C. Realistic Lip Gloss (Rose-red tint)
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(landmarks[LIPS_INDEXES[0]].x, landmarks[LIPS_INDEXES[0]].y);
-    for (let i = 1; i < LIPS_INDEXES.length; i++) {
-      ctx.lineTo(landmarks[LIPS_INDEXES[i]].x, landmarks[LIPS_INDEXES[i]].y);
-    }
-    ctx.closePath();
-
-    ctx.fillStyle = 'rgba(244, 63, 94, 0.14)'; // Translucent rose-tint
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(244, 63, 94, 0.2)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.restore();
-    ctx.restore();
-  }
-
-  // 5. Draw Cute Heart Blush Filter
-  if (activeFilters.includes('heart-blush')) {
-    ctx.save();
-    const leftCheek = landmarks[205];
-    const rightCheek = landmarks[425];
-    const nose = landmarks[4];
-    const forehead = landmarks[10];
-
-    let faceSize = 60;
-    if (nose && forehead) {
-      faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.6;
-    }
-
-    const drawSoftBlush = (c_x: number, c_y: number, r: number) => {
-      const blushGrad = ctx.createRadialGradient(c_x, c_y, 0, c_x, c_y, r);
-      blushGrad.addColorStop(0, 'rgba(255, 105, 180, 0.55)');
-      blushGrad.addColorStop(0.5, 'rgba(255, 105, 180, 0.2)');
-      blushGrad.addColorStop(1, 'rgba(255, 105, 180, 0)');
-
-      ctx.fillStyle = blushGrad;
-      ctx.beginPath();
-      ctx.arc(c_x, c_y, r, 0, Math.PI * 2);
-      ctx.fill();
-    };
-
-    if (leftCheek) {
-      drawSoftBlush(leftCheek.x, leftCheek.y, faceSize);
-      drawHeart(ctx, leftCheek.x, leftCheek.y - faceSize * 0.35, faceSize * 0.55, 'rgba(255, 51, 153, 0.85)', 'rgba(255, 51, 153, 0.8)', 10);
-    }
-    if (rightCheek) {
-      drawSoftBlush(rightCheek.x, rightCheek.y, faceSize);
-      drawHeart(ctx, rightCheek.x, rightCheek.y - faceSize * 0.35, faceSize * 0.55, 'rgba(255, 51, 153, 0.85)', 'rgba(255, 51, 153, 0.8)', 10);
-    }
-    ctx.restore();
-  }
-
-  // 6. Draw MacBook Floating Hearts Filter
-  if (activeFilters.includes('macbook-hearts')) {
-    const forehead = landmarks[10];
-    const nose = landmarks[4];
-
-    if (forehead && nose) {
-      ctx.save();
-      const faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.6;
-
-      const hearts = floatingHeartsRef.current;
+  const hearts = floatingHeartsRef.current;
+  
+  // Update state for all hearts (absolute hand particles and relative forehead particles)
+  hearts.forEach(p => {
+    if (p.originType === 'hand') {
+      p.y = (p.y || 0) - (p.speed || 3);
+      p.wobblePhase += p.wobbleSpeed;
+      p.rotation += p.rotationSpeed;
       
-      // Update state
-      hearts.forEach(p => {
-        p.yOffsetFactor -= p.speedFactor;
-        p.wobblePhase += p.wobbleSpeed;
-        p.rotation += p.rotationSpeed;
-        
-        // Handle scale animations (pop-in, pop-out)
-        if (p.scale < 1.0) {
-          p.scale = Math.min(1.0, p.scale + 0.10);
-        } else if (p.opacity < 0.35) {
-          p.scale = Math.max(0.1, p.scale - 0.05);
+      if (p.scale < 1.0) {
+        p.scale = Math.min(1.0, p.scale + 0.08);
+      } else if (p.opacity < 0.35) {
+        p.scale = Math.max(0.1, p.scale - 0.05);
+      }
+      p.opacity -= 0.010; // float up and fade out absolute hand particles
+    } else {
+      p.yOffsetFactor -= p.speedFactor;
+      p.wobblePhase += p.wobbleSpeed;
+      p.rotation += p.rotationSpeed;
+      
+      if (p.scale < 1.0) {
+        p.scale = Math.min(1.0, p.scale + 0.10);
+      } else if (p.opacity < 0.35) {
+        p.scale = Math.max(0.1, p.scale - 0.05);
+      }
+      p.opacity -= 0.018; // float up and fade out relative forehead particles
+    }
+  });
+
+  // Filter out dead particles
+  floatingHeartsRef.current = hearts.filter(p => p.opacity > 0);
+
+  // Check for two-hand heart gesture (runs always!)
+  let gestureActive = false;
+  let hand_x = 0;
+  let hand_y = 0;
+  let handSize = faceSize * 0.8; // default hand size scaled relative to face
+
+  if (rawHandmarks && rawHandmarks.length >= 2) {
+    const mapHandPoint = (pt: any) => {
+      const x_pixel = ((pt.x * dims.width) - crop.sx) / crop.sWidth * crop.targetW;
+      const y_pixel = ((pt.y * dims.height) - crop.sy) / crop.sHeight * crop.targetH;
+      return { x: x_pixel, y: y_pixel };
+    };
+
+    const hand1 = rawHandmarks[0];
+    const hand2 = rawHandmarks[1];
+
+    if (hand1 && hand2 && hand1[8] && hand2[8] && hand1[4] && hand2[4]) {
+      const L_idx = mapHandPoint(hand1[8]);
+      const R_idx = mapHandPoint(hand2[8]);
+      const L_thb = mapHandPoint(hand1[4]);
+      const R_thb = mapHandPoint(hand2[4]);
+
+      // Geometric check for two-hand heart:
+      // 1. Index fingertips are touching/close
+      // 2. Thumb tips are touching/close
+      // 3. Index tips are higher up than thumb tips
+      // 4. Vertical volume exists between tips and thumbs
+      const dist_index = Math.sqrt(Math.pow(L_idx.x - R_idx.x, 2) + Math.pow(L_idx.y - R_idx.y, 2));
+      const dist_thumb = Math.sqrt(Math.pow(L_thb.x - R_thb.x, 2) + Math.pow(L_thb.y - R_thb.y, 2));
+      const vert_diff = Math.max(L_thb.y, R_thb.y) - Math.min(L_idx.y, R_idx.y);
+
+      if (dist_index < 70 && dist_thumb < 70 && vert_diff > 25 && L_idx.y < L_thb.y && R_idx.y < R_thb.y) {
+        gestureActive = true;
+        hand_x = (L_idx.x + R_idx.x + L_thb.x + R_thb.x) / 4;
+        hand_y = (L_idx.y + R_idx.y + L_thb.y + R_thb.y) / 4;
+
+        if (hand1[0] && hand1[9] && hand2[0] && hand2[9]) {
+          const hand1_wrist = mapHandPoint(hand1[0]);
+          const hand1_knuckle = mapHandPoint(hand1[9]);
+          const size1 = Math.sqrt(Math.pow(hand1_wrist.x - hand1_knuckle.x, 2) + Math.pow(hand1_wrist.y - hand1_knuckle.y, 2));
+
+          const hand2_wrist = mapHandPoint(hand2[0]);
+          const hand2_knuckle = mapHandPoint(hand2[9]);
+          const size2 = Math.sqrt(Math.pow(hand2_wrist.x - hand2_knuckle.x, 2) + Math.pow(hand2_wrist.y - hand2_knuckle.y, 2));
+
+          handSize = (size1 + size2) / 2;
         }
+      }
+    }
+  }
 
-        p.opacity -= 0.018; // faster fade to match higher floating speed
+  // Spawn Forehead floating particles (if activeFilters has 'macbook-hearts' active)
+  if (activeFilters.includes('macbook-hearts') && forehead && nose) {
+    if (floatingHeartsRef.current.filter(p => p.originType !== 'hand').length < 18 && Math.random() < 0.12) {
+      floatingHeartsRef.current.push({
+        originType: 'forehead',
+        xOffsetFactor: (Math.random() - 0.5) * 3.4,
+        yOffsetFactor: -0.4 - Math.random() * 0.25,
+        speedFactor: 0.024 + Math.random() * 0.022,
+        sizeFactor: 0.35 + Math.random() * 0.18,
+        opacity: 1.0,
+        colorHue: 320 + Math.floor(Math.random() * 32),
+        wobbleSpeed: 0.03 + Math.random() * 0.04,
+        wobbleAmount: 0.12 + Math.random() * 0.18,
+        wobblePhase: Math.random() * Math.PI * 2,
+        rotation: (Math.random() - 0.5) * 0.8,
+        rotationSpeed: (Math.random() - 0.5) * 0.03,
+        scale: 0.1
       });
+    }
+  }
 
-      // Filter out dead particles
-      floatingHeartsRef.current = hearts.filter(p => p.opacity > 0);
+  // Spawn Hand Gesture particles (Exactly 1 heart per second, solid wine red, hand-sized)
+  if (gestureActive) {
+    const now = performance.now();
+    if (now - lastHandHeartSpawnTimeRef.current > 1000) {
+      lastHandHeartSpawnTimeRef.current = now;
 
-      // Spawn new particles (allow slightly more hearts for richer visual density)
-      if (floatingHeartsRef.current.length < 25 && Math.random() < 0.18) {
+      if (floatingHeartsRef.current.length < 50) {
         floatingHeartsRef.current.push({
-          xOffsetFactor: (Math.random() - 0.5) * 3.4, // much wider horizontal spread over forehead
-          yOffsetFactor: -0.4 - Math.random() * 0.25, // spawn clearly above the forehead/hair
-          speedFactor: 0.024 + Math.random() * 0.022, // further increased upward speed
-          sizeFactor: 0.35 + Math.random() * 0.18, // large heart sizes matching snapchat profile
+          originType: 'hand',
+          x: hand_x,
+          y: hand_y,
+          speed: 1.8 + Math.random() * 0.8, // gentle upward float speed (pixels per frame)
+          size: handSize * (2.2 + Math.random() * 0.4), // solid hand-sized heart (proportional to hands size, made big!)
           opacity: 1.0,
-          colorHue: 320 + Math.floor(Math.random() * 32), // Pink-Magenta spectrum HSL (320-352)
-          wobbleSpeed: 0.03 + Math.random() * 0.04,
-          wobbleAmount: 0.12 + Math.random() * 0.18, // wider sway amount
+          colorHue: 345, // Wine red hue base
+          wobbleSpeed: 0.02 + Math.random() * 0.02,
+          wobbleAmt: 8 + Math.random() * 8, // absolute pixel wobble width
           wobblePhase: Math.random() * Math.PI * 2,
-          rotation: (Math.random() - 0.5) * 0.8, // more tilt variety
-          rotationSpeed: (Math.random() - 0.5) * 0.03,
-          scale: 0.1 // start small
+          rotation: (Math.random() - 0.5) * 0.4, // slight initial tilt
+          rotationSpeed: (Math.random() - 0.5) * 0.01,
+          scale: 0.1,
+          xOffsetFactor: 0,
+          yOffsetFactor: 0,
+          speedFactor: 0,
+          sizeFactor: 0
         });
       }
-
-      // Draw all active hearts
-      floatingHeartsRef.current.forEach(p => {
-        const wobbleX = Math.sin(p.wobblePhase) * p.wobbleAmount;
-        const c_x = forehead.x + (p.xOffsetFactor + wobbleX) * faceSize;
-        const c_y = forehead.y + p.yOffsetFactor * faceSize;
-        const size = p.sizeFactor * faceSize * p.scale;
-
-        // Render soft, translucent pink overlays matching snapchat's aesthetic
-        const fillStyle = `hsla(${p.colorHue}, 100%, 68%, ${p.opacity * 0.70})`;
-        const shadowColor = `hsla(${p.colorHue}, 100%, 68%, ${p.opacity * 0.50})`;
-        
-        drawHeart(ctx, c_x, c_y, size, fillStyle, shadowColor, 8, p.rotation);
-      });
-
-      ctx.restore();
     }
   }
+
+  // Draw all active hearts
+  floatingHeartsRef.current.forEach(p => {
+    let c_x = 0;
+    let c_y = 0;
+    let size = 0;
+
+    if (p.originType === 'hand') {
+      const wobbleX = Math.sin(p.wobblePhase) * (p.wobbleAmt || 10);
+      c_x = (p.x || 0) + wobbleX;
+      c_y = p.y || 0;
+      size = (p.size || 30) * p.scale;
+    } else if (forehead && nose) {
+      const wobbleX = Math.sin(p.wobblePhase) * p.wobbleAmount;
+      c_x = forehead.x + (p.xOffsetFactor + wobbleX) * faceSize;
+      c_y = forehead.y + p.yOffsetFactor * faceSize;
+      size = p.sizeFactor * faceSize * p.scale;
+    } else {
+      return; // Skip if forehead coordinates are missing
+    }
+
+    const isWineRed = p.originType === 'hand';
+    const fillStyle = isWineRed
+      ? `hsla(345, 85%, 28%, ${p.opacity})` // Solid wine red
+      : `hsla(${p.colorHue}, 100%, 68%, ${p.opacity * 0.70})`;
+    const shadowColor = isWineRed
+      ? `hsla(345, 85%, 20%, ${p.opacity * 0.60})`
+      : `hsla(${p.colorHue}, 100%, 68%, ${p.opacity * 0.50})`;
+    
+    drawHeart(ctx, c_x, c_y, size, fillStyle, shadowColor, 8, p.rotation);
+  });
 
   ctx.restore();
 }
@@ -374,7 +481,9 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
   const streamRef = useRef<MediaStream | null>(null);
   
   const landmarkerRef = useRef<any>(null);
+  const handLandmarkerRef = useRef<any>(null);
   const lastLandmarksRef = useRef<any>(null);
+  const lastHandmarksRef = useRef<any>(null);
   const lastDimensionsRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
 
   const [permissionState, setPermissionState] = useState<'prompt' | 'granted' | 'denied'>('prompt');
@@ -413,7 +522,16 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
     rotation: number;
     rotationSpeed: number;
     scale: number;
+    // Gesture parameters for hand-based heart emissions
+    originType?: 'forehead' | 'hand';
+    x?: number;
+    y?: number;
+    speed?: number;
+    wobbleAmt?: number;
+    size?: number;
   }[]>([]);
+
+  const lastHandHeartSpawnTimeRef = useRef<number>(0);
 
   // Preload SVG assets on mount
   useEffect(() => {
@@ -422,7 +540,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
     filterImagesRef.current.aviators = img1;
   }, []);
 
-  // Initialize MediaPipe FaceLandmarker
+  // Initialize MediaPipe FaceLandmarker and HandLandmarker
   useEffect(() => {
     let active = true;
     async function loadMediaPipe() {
@@ -431,22 +549,36 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
         const filesetResolver = await vision.FilesetResolver.forVisionTasks(
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm"
         );
-        const faceLandmarker = await vision.FaceLandmarker.createFromOptions(filesetResolver, {
-          baseOptions: {
-            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-            delegate: "GPU"
-          },
-          outputFaceBlendshapes: false,
-          runningMode: "VIDEO",
-          numFaces: 1
-        });
+        
+        // Load both models in parallel for maximum performance
+        const [faceLandmarker, handLandmarker] = await Promise.all([
+          vision.FaceLandmarker.createFromOptions(filesetResolver, {
+            baseOptions: {
+              modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+              delegate: "GPU"
+            },
+            outputFaceBlendshapes: false,
+            runningMode: "VIDEO",
+            numFaces: 1
+          }),
+          vision.HandLandmarker.createFromOptions(filesetResolver, {
+            baseOptions: {
+              modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+              delegate: "GPU"
+            },
+            runningMode: "VIDEO",
+            numHands: 2
+          })
+        ]);
+
         if (active) {
           landmarkerRef.current = faceLandmarker;
+          handLandmarkerRef.current = handLandmarker;
           setHasLandmarker(true);
           setIsModelLoading(false);
         }
       } catch (err) {
-        console.error("Failed to load FaceLandmarker (AR filters disabled):", err);
+        console.error("Failed to load MediaPipe models (AR filters disabled):", err);
         if (active) {
           setIsModelLoading(false);
         }
@@ -457,6 +589,9 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
       active = false;
       if (landmarkerRef.current) {
         landmarkerRef.current.close();
+      }
+      if (handLandmarkerRef.current) {
+        handLandmarkerRef.current.close();
       }
     };
   }, []);
@@ -557,32 +692,62 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
         // Draw camera frame
         ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
 
-        // Detect facial landmarks and apply overlay
+        // Detect landmarks and apply overlay
         const landmarker = landmarkerRef.current;
-        if (landmarker && video.currentTime !== lastVideoTime) {
+        const handLandmarker = handLandmarkerRef.current;
+        if (video.currentTime !== lastVideoTime) {
           lastVideoTime = video.currentTime;
           
-          try {
-            const results = landmarker.detectForVideo(video, performance.now());
-            if (results.faceLandmarks && results.faceLandmarks.length > 0) {
-              lastLandmarksRef.current = results.faceLandmarks[0];
-              lastDimensionsRef.current = { width: videoW, height: videoH };
+          if (landmarker) {
+            try {
+              const results = landmarker.detectForVideo(video, performance.now());
+              if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+                lastLandmarksRef.current = results.faceLandmarks[0];
+                lastDimensionsRef.current = { width: videoW, height: videoH };
+              }
+            } catch (err) {
+              console.error("Landmark detection error:", err);
             }
-          } catch (err) {
-            console.error("Landmark detection error:", err);
+          }
+
+          if (handLandmarker) {
+            try {
+              const handResults = handLandmarker.detectForVideo(video, performance.now());
+              if (handResults.landmarks && handResults.landmarks.length > 0) {
+                lastHandmarksRef.current = handResults.landmarks;
+              } else {
+                lastHandmarksRef.current = null;
+              }
+            } catch (err) {
+              console.error("Hand detection error:", err);
+            }
+          } else {
+            lastHandmarksRef.current = null;
           }
         }
 
-        // Render AR Filters using cached landmarks (ELIMINATES FLICKERING)
+        // Render AR Filters and Hand Gestures (runs always when camera is active)
         const cachedLandmarks = lastLandmarksRef.current;
         const dims = lastDimensionsRef.current;
-        if (cachedLandmarks && dims.width > 0 && dims.height > 0 && activeFilters.length > 0) {
-          const mappedLandmarks = cachedLandmarks.map((pt: any) => {
-            const x_pixel = ((pt.x * dims.width) - sx) / sWidth * targetW;
-            const y_pixel = ((pt.y * dims.height) - sy) / sHeight * targetH;
-            return { x: x_pixel, y: y_pixel, z: pt.z };
-          });
-          drawFilters(ctx, mappedLandmarks, activeFilters, filterImagesRef.current, floatingHeartsRef);
+        if (dims.width > 0 && dims.height > 0) {
+          const mappedLandmarks = cachedLandmarks
+            ? cachedLandmarks.map((pt: any) => {
+                const x_pixel = ((pt.x * dims.width) - sx) / sWidth * targetW;
+                const y_pixel = ((pt.y * dims.height) - sy) / sHeight * targetH;
+                return { x: x_pixel, y: y_pixel, z: pt.z };
+              })
+            : [];
+          drawFilters(
+            ctx,
+            mappedLandmarks,
+            activeFilters,
+            filterImagesRef.current,
+            floatingHeartsRef,
+            lastHandHeartSpawnTimeRef,
+            lastHandmarksRef.current,
+            dims,
+            { sx, sy, sWidth, sHeight, targetW, targetH }
+          );
         }
 
         // Draw Screen Overlays (e.g. Noise filter) that do not depend on landmarks
