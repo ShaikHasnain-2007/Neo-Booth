@@ -371,31 +371,31 @@ function drawFilters(
         
         // Handle scale animations (pop-in, pop-out)
         if (p.scale < 1.0) {
-          p.scale = Math.min(1.0, p.scale + 0.08);
-        } else if (p.opacity < 0.3) {
-          p.scale = Math.max(0.1, p.scale - 0.04);
+          p.scale = Math.min(1.0, p.scale + 0.10);
+        } else if (p.opacity < 0.35) {
+          p.scale = Math.max(0.1, p.scale - 0.05);
         }
 
-        p.opacity -= 0.012; // slow fade for floating duration
+        p.opacity -= 0.014; // slightly faster fade to match faster speed
       });
 
       // Filter out dead particles
       floatingHeartsRef.current = hearts.filter(p => p.opacity > 0);
 
       // Spawn new particles (allow slightly more hearts for richer visual density)
-      if (floatingHeartsRef.current.length < 18 && Math.random() < 0.1) {
+      if (floatingHeartsRef.current.length < 25 && Math.random() < 0.18) {
         floatingHeartsRef.current.push({
-          xOffsetFactor: (Math.random() - 0.5) * 1.6, // wider horizontal spread
-          yOffsetFactor: -0.25 - Math.random() * 0.1, // spawn slightly above forehead
-          speedFactor: 0.006 + Math.random() * 0.01, // natural drift speed
-          sizeFactor: 0.35 + Math.random() * 0.18, // much larger, realistic heart sizes matching snapchat profile
+          xOffsetFactor: (Math.random() - 0.5) * 3.4, // much wider horizontal spread over forehead
+          yOffsetFactor: -0.4 - Math.random() * 0.25, // spawn clearly above the forehead/hair
+          speedFactor: 0.015 + Math.random() * 0.018, // increased upward speed
+          sizeFactor: 0.35 + Math.random() * 0.18, // large heart sizes matching snapchat profile
           opacity: 1.0,
           colorHue: 320 + Math.floor(Math.random() * 32), // Pink-Magenta spectrum HSL (320-352)
-          wobbleSpeed: 0.02 + Math.random() * 0.03,
-          wobbleAmount: 0.08 + Math.random() * 0.12,
+          wobbleSpeed: 0.03 + Math.random() * 0.04,
+          wobbleAmount: 0.12 + Math.random() * 0.18, // wider sway amount
           wobblePhase: Math.random() * Math.PI * 2,
-          rotation: (Math.random() - 0.5) * 0.6, // slightly more initial rotation range
-          rotationSpeed: (Math.random() - 0.5) * 0.02,
+          rotation: (Math.random() - 0.5) * 0.8, // more tilt variety
+          rotationSpeed: (Math.random() - 0.5) * 0.03,
           scale: 0.1 // start small
         });
       }
