@@ -19,7 +19,7 @@ interface WebcamCaptureProps {
 }
 
 type CapturePhase = 'idle' | 'countdown' | 'flash' | 'intermission';
-type ARFilter = 'cyber-mesh' | 'aviators' | 'cyber-shades' | 'beauty-makeup' | 'heart-blush' | 'noise';
+type ARFilter = 'cyber-mesh' | 'aviators' | 'cyber-shades' | 'beauty-makeup' | 'heart-blush' | 'macbook-hearts' | 'noise';
 
 // Pre-generate static noise patterns for fast tiling overlay
 let noiseCanvases: HTMLCanvasElement[] = [];
@@ -61,11 +61,43 @@ function drawPath(ctx: CanvasRenderingContext2D, landmarks: any[], indexes: numb
   ctx.stroke();
 }
 
+function drawHeart(
+  ctx: CanvasRenderingContext2D,
+  c_x: number,
+  c_y: number,
+  size: number,
+  fillStyle: string,
+  shadowColor?: string,
+  shadowBlur: number = 0,
+  rotation: number = 0
+) {
+  ctx.save();
+  ctx.translate(c_x, c_y);
+  ctx.rotate(rotation);
+  
+  ctx.beginPath();
+  const yOffset = -size * 0.5; // Center the heart vertically
+  const topCurveHeight = size * 0.3;
+  ctx.moveTo(0, yOffset + topCurveHeight);
+  ctx.bezierCurveTo(-size / 2, yOffset - topCurveHeight / 2, -size / 2, yOffset + topCurveHeight, 0, yOffset + size);
+  ctx.bezierCurveTo(size / 2, yOffset + topCurveHeight, size / 2, yOffset - topCurveHeight / 2, 0, yOffset + topCurveHeight);
+  ctx.closePath();
+
+  ctx.fillStyle = fillStyle;
+  if (shadowColor) {
+    ctx.shadowColor = shadowColor;
+    ctx.shadowBlur = shadowBlur;
+  }
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawFilters(
   ctx: CanvasRenderingContext2D,
   landmarks: any[],
   activeFilters: ARFilter[],
-  images: { aviators: HTMLImageElement | null }
+  images: { aviators: HTMLImageElement | null },
+  floatingHeartsRef: React.MutableRefObject<any[]>
 ) {
   if (activeFilters.length === 0) return;
 
@@ -297,21 +329,6 @@ function drawFilters(
       faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.6;
     }
 
-    const drawHeart = (c_x: number, c_y: number, size: number) => {
-      ctx.save();
-      ctx.beginPath();
-      const topCurveHeight = size * 0.3;
-      ctx.moveTo(c_x, c_y + topCurveHeight);
-      ctx.bezierCurveTo(c_x - size / 2, c_y - topCurveHeight / 2, c_x - size / 2, c_y + topCurveHeight, c_x, c_y + size);
-      ctx.bezierCurveTo(c_x + size / 2, c_y + topCurveHeight, c_x + size / 2, c_y - topCurveHeight / 2, c_x, c_y + topCurveHeight);
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(255, 51, 153, 0.85)';
-      ctx.shadowColor = 'rgba(255, 51, 153, 0.8)';
-      ctx.shadowBlur = 10;
-      ctx.fill();
-      ctx.restore();
-    };
-
     const drawSoftBlush = (c_x: number, c_y: number, r: number) => {
       const blushGrad = ctx.createRadialGradient(c_x, c_y, 0, c_x, c_y, r);
       blushGrad.addColorStop(0, 'rgba(255, 105, 180, 0.55)');
@@ -326,13 +343,78 @@ function drawFilters(
 
     if (leftCheek) {
       drawSoftBlush(leftCheek.x, leftCheek.y, faceSize);
-      drawHeart(leftCheek.x, leftCheek.y - faceSize * 0.35, faceSize * 0.55);
+      drawHeart(ctx, leftCheek.x, leftCheek.y - faceSize * 0.35, faceSize * 0.55, 'rgba(255, 51, 153, 0.85)', 'rgba(255, 51, 153, 0.8)', 10);
     }
     if (rightCheek) {
       drawSoftBlush(rightCheek.x, rightCheek.y, faceSize);
-      drawHeart(rightCheek.x, rightCheek.y - faceSize * 0.35, faceSize * 0.55);
+      drawHeart(ctx, rightCheek.x, rightCheek.y - faceSize * 0.35, faceSize * 0.55, 'rgba(255, 51, 153, 0.85)', 'rgba(255, 51, 153, 0.8)', 10);
     }
     ctx.restore();
+  }
+
+  // 6. Draw MacBook Floating Hearts Filter
+  if (activeFilters.includes('macbook-hearts')) {
+    const forehead = landmarks[10];
+    const nose = landmarks[4];
+
+    if (forehead && nose) {
+      ctx.save();
+      const faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.6;
+
+      const hearts = floatingHeartsRef.current;
+      
+      // Update state
+      hearts.forEach(p => {
+        p.yOffsetFactor -= p.speedFactor;
+        p.wobblePhase += p.wobbleSpeed;
+        p.rotation += p.rotationSpeed;
+        
+        // Handle scale animations (pop-in, pop-out)
+        if (p.scale < 1.0) {
+          p.scale = Math.min(1.0, p.scale + 0.08);
+        } else if (p.opacity < 0.3) {
+          p.scale = Math.max(0.1, p.scale - 0.04);
+        }
+
+        p.opacity -= 0.012; // slow fade for floating duration
+      });
+
+      // Filter out dead particles
+      floatingHeartsRef.current = hearts.filter(p => p.opacity > 0);
+
+      // Spawn new particles (allow slightly more hearts for richer visual density)
+      if (floatingHeartsRef.current.length < 18 && Math.random() < 0.1) {
+        floatingHeartsRef.current.push({
+          xOffsetFactor: (Math.random() - 0.5) * 1.6, // wider horizontal spread
+          yOffsetFactor: -0.25 - Math.random() * 0.1, // spawn slightly above forehead
+          speedFactor: 0.006 + Math.random() * 0.01, // natural drift speed
+          sizeFactor: 0.08 + Math.random() * 0.12, // variety in sizes
+          opacity: 1.0,
+          colorHue: 340 + Math.floor(Math.random() * 30), // Pink-Red spectrum HSL
+          wobbleSpeed: 0.02 + Math.random() * 0.03,
+          wobbleAmount: 0.08 + Math.random() * 0.12,
+          wobblePhase: Math.random() * Math.PI * 2,
+          rotation: (Math.random() - 0.5) * 0.5,
+          rotationSpeed: (Math.random() - 0.5) * 0.02,
+          scale: 0.1 // start small
+        });
+      }
+
+      // Draw all active hearts
+      floatingHeartsRef.current.forEach(p => {
+        const wobbleX = Math.sin(p.wobblePhase) * p.wobbleAmount;
+        const c_x = forehead.x + (p.xOffsetFactor + wobbleX) * faceSize;
+        const c_y = forehead.y + p.yOffsetFactor * faceSize;
+        const size = p.sizeFactor * faceSize * p.scale;
+
+        const fillStyle = `hsla(${p.colorHue}, 100%, 65%, ${p.opacity})`;
+        const shadowColor = `hsla(${p.colorHue}, 100%, 65%, ${p.opacity * 0.7})`;
+        
+        drawHeart(ctx, c_x, c_y, size, fillStyle, shadowColor, 8, p.rotation);
+      });
+
+      ctx.restore();
+    }
   }
 
   ctx.restore();
@@ -368,6 +450,22 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
   const filterImagesRef = useRef<{ aviators: HTMLImageElement | null }>({
     aviators: null
   });
+
+  // Floating heart particles state for MacBook photo effect
+  const floatingHeartsRef = useRef<{
+    xOffsetFactor: number;
+    yOffsetFactor: number;
+    speedFactor: number;
+    sizeFactor: number;
+    opacity: number;
+    colorHue: number;
+    wobbleSpeed: number;
+    wobbleAmount: number;
+    wobblePhase: number;
+    rotation: number;
+    rotationSpeed: number;
+    scale: number;
+  }[]>([]);
 
   // Preload SVG assets on mount
   useEffect(() => {
@@ -536,7 +634,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
             const y_pixel = ((pt.y * dims.height) - sy) / sHeight * targetH;
             return { x: x_pixel, y: y_pixel, z: pt.z };
           });
-          drawFilters(ctx, mappedLandmarks, activeFilters, filterImagesRef.current);
+          drawFilters(ctx, mappedLandmarks, activeFilters, filterImagesRef.current, floatingHeartsRef);
         }
 
         // Draw Screen Overlays (e.g. Noise filter) that do not depend on landmarks
@@ -734,6 +832,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
                   { id: 'cyber-shades', label: 'Shades', icon: '🕶️' },
                   { id: 'aviators', label: 'Aviator', icon: '👓' },
                   { id: 'heart-blush', label: 'Hearts', icon: '💖' },
+                  { id: 'macbook-hearts', label: 'Float Hearts', icon: '💕' },
                   { id: 'noise', label: 'Noise', icon: '📺' },
                 ].map((filt) => {
                   const isSelected = filt.id === 'none'
