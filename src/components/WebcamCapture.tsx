@@ -388,13 +388,13 @@ function drawFilters(
           xOffsetFactor: (Math.random() - 0.5) * 1.6, // wider horizontal spread
           yOffsetFactor: -0.25 - Math.random() * 0.1, // spawn slightly above forehead
           speedFactor: 0.006 + Math.random() * 0.01, // natural drift speed
-          sizeFactor: 0.08 + Math.random() * 0.12, // variety in sizes
+          sizeFactor: 0.35 + Math.random() * 0.18, // much larger, realistic heart sizes matching snapchat profile
           opacity: 1.0,
-          colorHue: 340 + Math.floor(Math.random() * 30), // Pink-Red spectrum HSL
+          colorHue: 320 + Math.floor(Math.random() * 32), // Pink-Magenta spectrum HSL (320-352)
           wobbleSpeed: 0.02 + Math.random() * 0.03,
           wobbleAmount: 0.08 + Math.random() * 0.12,
           wobblePhase: Math.random() * Math.PI * 2,
-          rotation: (Math.random() - 0.5) * 0.5,
+          rotation: (Math.random() - 0.5) * 0.6, // slightly more initial rotation range
           rotationSpeed: (Math.random() - 0.5) * 0.02,
           scale: 0.1 // start small
         });
@@ -407,8 +407,9 @@ function drawFilters(
         const c_y = forehead.y + p.yOffsetFactor * faceSize;
         const size = p.sizeFactor * faceSize * p.scale;
 
-        const fillStyle = `hsla(${p.colorHue}, 100%, 65%, ${p.opacity})`;
-        const shadowColor = `hsla(${p.colorHue}, 100%, 65%, ${p.opacity * 0.7})`;
+        // Render soft, translucent pink overlays matching snapchat's aesthetic
+        const fillStyle = `hsla(${p.colorHue}, 100%, 68%, ${p.opacity * 0.55})`;
+        const shadowColor = `hsla(${p.colorHue}, 100%, 68%, ${p.opacity * 0.35})`;
         
         drawHeart(ctx, c_x, c_y, size, fillStyle, shadowColor, 8, p.rotation);
       });
