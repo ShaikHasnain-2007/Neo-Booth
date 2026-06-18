@@ -14,7 +14,7 @@ interface WebcamCaptureProps {
 }
 
 type CapturePhase = 'idle' | 'countdown' | 'flash' | 'intermission';
-type ARFilter = 'aviators' | 'cyber-shades' | 'beauty-makeup' | 'heart-blush' | 'macbook-hearts' | 'noise';
+type ARFilter = 'aviators' | 'cyber-shades' | 'beauty-makeup' | 'heart-blush' | 'macbook-hearts' | 'noise' | 'tulip';
 
 // Pre-generate static noise patterns for fast tiling overlay
 let noiseCanvases: HTMLCanvasElement[] = [];
@@ -87,7 +87,7 @@ function drawFilters(
   ctx: CanvasRenderingContext2D,
   landmarks: any[],
   activeFilters: ARFilter[],
-  images: { aviators: HTMLImageElement | null },
+  images: { aviators: HTMLImageElement | null; tulip: HTMLImageElement | null },
   floatingHeartsRef: React.MutableRefObject<any[]>,
   lastHandHeartSpawnTimeRef: React.MutableRefObject<number>,
   rawHandmarks: any[][] | null,
@@ -304,6 +304,46 @@ function drawFilters(
         drawHeart(ctx, rightCheek.x, rightCheek.y - faceSize * 0.35, faceSize * 0.55, 'rgba(255, 51, 153, 0.85)', 'rgba(255, 51, 153, 0.8)', 10);
       }
     }
+
+    // 6. Draw Tulip Filter (Plumeria flower on the temple / ear side)
+    if (activeFilters.includes('tulip')) {
+      const templePoint = landmarks[103] || landmarks[109]; // Right side of forehead / temple
+      const rightEar = landmarks[234] || landmarks[127]; // Outer right face edge
+      const img = images.tulip;
+
+      if (templePoint && rightEar && img && img.complete) {
+        ctx.save();
+        const nose = landmarks[4];
+        const forehead = landmarks[10];
+        let faceSize = 80;
+        if (nose && forehead) {
+          faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.6;
+        }
+
+        // Calculate rotation based on head tilt
+        const leftEyeOuter = landmarks[130];
+        const rightEyeOuter = landmarks[359];
+        let angle = 0;
+        if (leftEyeOuter && rightEyeOuter) {
+          const dx = rightEyeOuter.x - leftEyeOuter.x;
+          const dy = rightEyeOuter.y - leftEyeOuter.y;
+          angle = Math.atan2(dy, dx);
+        }
+
+        // Position the flower on the user's right temple (left side of canvas in mirror mode)
+        const x = templePoint.x - (templePoint.x - rightEar.x) * 0.2;
+        const y = templePoint.y + (rightEar.y - templePoint.y) * 0.1;
+
+        ctx.translate(x, y);
+        ctx.rotate(angle + 0.15); // Add a small natural tilt
+
+        const w = faceSize * 1.05;
+        const h = w;
+
+        ctx.drawImage(img, -w / 2, -h / 2, w, h);
+        ctx.restore();
+      }
+    }
   }
 
   // ALWAYS Draw & Update Floating Hearts Particle System (Forehead loop and Hand gestures)
@@ -509,9 +549,10 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Pre-loaded SVG glasses images
-  const filterImagesRef = useRef<{ aviators: HTMLImageElement | null }>({
-    aviators: null
+  // Pre-loaded SVG glasses and tulip images
+  const filterImagesRef = useRef<{ aviators: HTMLImageElement | null; tulip: HTMLImageElement | null }>({
+    aviators: null,
+    tulip: null
   });
 
   // Floating heart particles state for MacBook photo effect
@@ -539,11 +580,15 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
 
   const lastHandHeartSpawnTimeRef = useRef<number>(0);
 
-  // Preload SVG assets on mount
+  // Preload assets on mount
   useEffect(() => {
     const img1 = new Image();
     img1.src = '/filters/aviators.svg';
     filterImagesRef.current.aviators = img1;
+
+    const img2 = new Image();
+    img2.src = '/filters/tulip.png';
+    filterImagesRef.current.tulip = img2;
   }, []);
 
   // Initialize MediaPipe FaceLandmarker and HandLandmarker
@@ -951,6 +996,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
                   { id: 'aviators', label: 'Aviator', icon: '👓' },
                   { id: 'heart-blush', label: 'Hearts', icon: '💖' },
                   { id: 'macbook-hearts', label: 'Float Hearts', icon: '💕' },
+                  { id: 'tulip', label: 'Tulip', icon: '🌸' },
                   { id: 'noise', label: 'Noise', icon: '📺' },
                 ].map((filt) => {
                   const isSelected = filt.id === 'none'
