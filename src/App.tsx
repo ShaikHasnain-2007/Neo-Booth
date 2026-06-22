@@ -39,7 +39,7 @@ const layoutsList = [
   },
   {
     id: 'traditional-4' as const,
-    name: 'Traditional Photobooth Layout',
+    name: 'Traditional',
     poses: 4,
     description: '4 Pose Vertical',
     style: 'traditional',
@@ -73,6 +73,23 @@ function App() {
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
 
   const previewContainerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(300);
+
+  useEffect(() => {
+    const element = previewContainerRef.current;
+    if (!element) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.width > 0) {
+          setContainerWidth(entry.contentRect.width);
+        }
+      }
+    });
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [stitchedPhoto, view]);
 
   useEffect(() => {
     setSoundEnabled(soundEnabled);
@@ -277,7 +294,7 @@ function App() {
   return (
     <div className="min-h-screen y2k-grid flex flex-col justify-between p-3 md:p-5 lg:p-6 relative">
 
-      {view !== 'booth' && (
+      {(view === 'landing' || view === 'layout-select') && (
         <header className="w-full max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between border-3 border-cream-900 bg-white p-3 md:p-4 rounded-2xl shadow-neo mb-4 relative overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-pastelpink-300 via-sage-300 to-maroon-800" />
           
@@ -323,7 +340,49 @@ function App() {
         </header>
       )}
 
-      <main className="flex-1 w-full max-w-5xl mx-auto flex items-center justify-center py-2 md:py-4">
+      {view === 'result' && (
+        <header className="absolute top-3 left-3 right-3 md:top-4 md:left-4 md:right-4 flex items-start justify-between z-50 pointer-events-none">
+          {/* Left Side: Logo Box Card */}
+          <div className="flex flex-col border-3 border-cream-900 bg-white p-2 md:p-2.5 rounded-2xl shadow-neo relative overflow-hidden max-w-[200px] md:max-w-xs shrink-0 pointer-events-auto">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-pastelpink-300 via-sage-300 to-maroon-800" />
+            
+            <div className="flex items-center gap-2 mt-0.5">
+              {/* Camera Icon in Rounded Pink Box */}
+              <div className="w-7 h-7 md:w-8 md:h-8 rounded-lg bg-pastelpink-200 border-2 border-cream-900 flex items-center justify-center rotate-3 shadow-neo-sm shrink-0">
+                <Camera className="w-3.5 h-3.5 md:w-4 md:h-4 text-cream-900" />
+              </div>
+              <div>
+                <div className="flex items-center gap-1">
+                  <h1 className="text-sm md:text-base font-bold uppercase tracking-wider m-0 leading-none text-cream-900 select-none">
+                    NEO.BOOTH
+                  </h1>
+                  <span className="text-[7px] md:text-[8px] font-mono text-pastelpink-500 font-bold px-1 py-0.2 border border-pastelpink-200 rounded bg-pastelpink-50 leading-none">
+                    v2.0
+                  </span>
+                </div>
+                <p className="text-[6.5px] md:text-[7.5px] font-mono uppercase tracking-wider text-cream-600 mt-0.5 leading-none">
+                  ✦ Tokyo-Retro / Gen-Z Photobooth ✦
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Side: Sound Toggle Button */}
+          <div className="flex items-center gap-2 mt-0.5 pointer-events-auto">
+            <button
+              onClick={handleToggleSound}
+              className={`flex items-center gap-1.5 px-3 py-1.5 border-3 border-cream-900 rounded-xl shadow-neo hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-neo-sm active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all cursor-pointer font-mono text-[9px] md:text-[10px] font-bold uppercase ${
+                soundEnabled ? 'bg-pastelpink-100 text-cream-900' : 'bg-cream-100 text-cream-500'
+              }`}
+            >
+              {soundEnabled ? <Volume2 className="w-3 h-3 md:w-3.5 md:h-3.5" /> : <VolumeX className="w-3 h-3 md:w-3.5 md:h-3.5" />}
+              <span>{soundEnabled ? 'Sound On' : 'Muted'}</span>
+            </button>
+          </div>
+        </header>
+      )}
+
+      <main className={`flex-1 w-full max-w-5xl mx-auto flex ${view === 'result' ? 'items-start pt-24 lg:pt-6 xl:pt-2' : 'items-center'} justify-center py-2 md:py-4`}>
         <AnimatePresence mode="wait">
 
           {view === 'landing' && (
@@ -493,7 +552,7 @@ function App() {
                       playClick();
                       setView('layout-select');
                     }}
-                    className="px-4 py-2 border-2 border-cream-900 bg-white font-bold text-xs uppercase rounded-xl shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer"
+                    className="px-4 py-2 border-2 border-cream-900 bg-white font-bold text-xs uppercase rounded-xl shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer font-sans"
                   >
                     ← Back to Layouts
                   </button>
@@ -519,7 +578,7 @@ function App() {
                 </div>
 
                 <span className="font-mono text-xs font-bold uppercase text-cream-500">
-                  Step 2: Take Poses ({getPhotoCountForLayout(options.layout)} photos)
+                  Step 2: Take Poses ({getPhotoCountForLayout(options.layout)} Poses)
                 </span>
               </div>
               <WebcamCapture 
@@ -559,6 +618,7 @@ function App() {
                       ref={previewContainerRef}
                       onClick={() => setSelectedStickerId(null)}
                       className="relative w-fit max-w-full select-none cursor-default"
+                      style={{ '--container-width': `${containerWidth}px` } as React.CSSProperties}
                     >
                       <motion.img
                         initial={{ opacity: 0, scale: 0.98 }}
@@ -566,7 +626,7 @@ function App() {
                         transition={{ duration: 0.3 }}
                         src={stitchedPhoto}
                         alt="Your Stitched Photo Strip"
-                        className="max-h-[60vh] w-auto border-2 border-cream-900 rounded shadow-md pointer-events-none select-none block"
+                        className="max-h-[72vh] min-w-[220px] w-auto border-2 border-cream-900 rounded shadow-md pointer-events-none select-none block"
                       />
 
                       {stickers.map((sticker) => {
@@ -596,13 +656,23 @@ function App() {
                             }`}
                           >
                             {emoji && (
-                              <span className="text-4xl filter drop-shadow select-none pointer-events-none block">
+                              <span 
+                                style={{ fontSize: 'calc(var(--container-width) * 0.11)' }} 
+                                className="filter drop-shadow select-none pointer-events-none block leading-none"
+                              >
                                 {emoji}
                               </span>
                             )}
                             {badgeText && (
                               <span
-                                className={`font-black text-xl select-none pointer-events-none px-2 py-0.5 border-2 border-black rounded-lg shadow-neo-sm font-sans tracking-wide block ${
+                                style={{
+                                  fontSize: 'calc(var(--container-width) * 0.068)',
+                                  borderWidth: 'max(2px, calc(var(--container-width) * 0.0045))',
+                                  padding: 'calc(var(--container-width) * 0.001) calc(var(--container-width) * 0.005)',
+                                  borderRadius: 'max(4px, calc(var(--container-width) * 0.012))',
+                                  boxShadow: 'max(3px, calc(var(--container-width) * 0.006)) max(3px, calc(var(--container-width) * 0.006)) 0px #000000',
+                                }}
+                                className={`font-black select-none pointer-events-none font-sans tracking-wide block leading-none border-black ${
                                   sticker.type.startsWith('badge-cute') ? 'bg-[#FFD6DE] text-cream-900' :
                                   sticker.type.startsWith('badge-y2k') ? 'bg-[#00FFCC] text-cream-900' :
                                   sticker.type.startsWith('badge-cool') ? 'bg-[#CFDEC0] text-cream-900' :
@@ -660,9 +730,11 @@ function App() {
         </AnimatePresence>
       </main>
 
-      <footer className="w-full max-w-5xl mx-auto border-t-2 border-cream-200 mt-4 pt-3 md:mt-6 md:pt-4 flex items-center justify-center font-mono text-[10px] text-cream-400 uppercase tracking-widest">
-        <span>✦ Made with love ✦ Neo.Booth Photobooth ✦</span>
-      </footer>
+      {view !== 'booth' && (
+        <footer className="w-full max-w-5xl mx-auto border-t-2 border-cream-200 mt-4 pt-3 md:mt-6 md:pt-4 flex items-center justify-center font-mono text-[10px] text-cream-400 uppercase tracking-widest">
+          <span>✦ Made with love ✦ Neo.Booth Photobooth ✦</span>
+        </footer>
+      )}
     </div>
   );
 }

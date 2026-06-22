@@ -219,6 +219,27 @@ const drawStarShape = (ctx: CanvasRenderingContext2D, cx: number, cy: number, in
   ctx.fill();
 };
 
+const drawRoundedRect = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+) => {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  ctx.lineTo(x + radius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+};
+
 const drawStars = (ctx: CanvasRenderingContext2D, w: number, h: number, swatchColor: string) => {
   ctx.save();
   ctx.fillStyle = swatchColor;
@@ -227,10 +248,17 @@ const drawStars = (ctx: CanvasRenderingContext2D, w: number, h: number, swatchCo
   const starColor = isColorDark(swatchColor) ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.08)';
   ctx.fillStyle = starColor;
   
-  for (let y = 40; y < h; y += 120) {
-    for (let x = 40; x < w; x += 120) {
-      const shiftX = ((x * y) % 60) - 30;
-      const shiftY = ((x + y) % 60) - 30;
+  const colSpacing = 120;
+  const cols = Math.max(2, Math.ceil((w - 40) / colSpacing) + 1);
+  const rowSpacing = 120;
+  const rows = Math.max(2, Math.ceil((h - 40) / rowSpacing) + 1);
+
+  for (let row = 0; row < rows; row++) {
+    const y = rows > 1 ? 25 + (row / (rows - 1)) * (h - 50) : h / 2;
+    for (let col = 0; col < cols; col++) {
+      const x = cols > 1 ? 25 + (col / (cols - 1)) * (w - 50) : w / 2;
+      const shiftX = ((col * row * 13) % 20) - 10;
+      const shiftY = ((col * row * 19) % 20) - 10;
       drawStarShape(ctx, x + shiftX, y + shiftY, 6, 15, 4);
     }
   }
@@ -282,10 +310,17 @@ const drawCherries = (ctx: CanvasRenderingContext2D, w: number, h: number, swatc
   ctx.fillStyle = swatchColor;
   ctx.fillRect(0, 0, w, h);
   
-  for (let y = 60; y < h; y += 180) {
-    for (let x = 60; x < w; x += 180) {
-      const shiftX = ((x * y) % 80) - 40;
-      const shiftY = ((x + y) % 80) - 40;
+  const colSpacing = 160;
+  const cols = Math.max(2, Math.ceil((w - 40) / colSpacing) + 1);
+  const rowSpacing = 160;
+  const rows = Math.max(2, Math.ceil((h - 40) / rowSpacing) + 1);
+
+  for (let row = 0; row < rows; row++) {
+    const y = rows > 1 ? 25 + (row / (rows - 1)) * (h - 50) : h / 2;
+    for (let col = 0; col < cols; col++) {
+      const x = cols > 1 ? 25 + (col / (cols - 1)) * (w - 50) : w / 2;
+      const shiftX = ((col * row * 17) % 30) - 15;
+      const shiftY = ((col * row * 23) % 30) - 15;
       drawSingleCherry(ctx, x + shiftX, y + shiftY);
     }
   }
@@ -409,31 +444,6 @@ export async function stitchPhotos(
 
   const isTraditional = options.layout === 'traditional-4';
   const finalBgColor = isTraditional ? '#000000' : options.backgroundColor;
-
-  if (isTraditional) {
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  } else {
-    switch (options.pattern) {
-      case 'checkerboard':
-        drawCheckerboard(ctx, canvas.width, canvas.height, finalBgColor);
-        break;
-      case 'stars':
-        drawStars(ctx, canvas.width, canvas.height, finalBgColor);
-        break;
-      case 'cherries':
-        drawCherries(ctx, canvas.width, canvas.height, finalBgColor);
-        break;
-      case 'hologradient':
-        drawHoloGradient(ctx, canvas.width, canvas.height);
-        break;
-      case 'none':
-      default:
-        ctx.fillStyle = finalBgColor;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        break;
-    }
-  }
 
   if (options.layout === 'grid-6') {
     canvas.width = pW * 2 + padding * 2 + gap;
@@ -595,26 +605,60 @@ export async function stitchPhotos(
       const badgeText = sticker.text || getBadgeTextForSticker(sticker.type);
 
       if (emoji) {
-        ctx.font = `${Math.round(64 * sticker.scale)}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+        // Base size is 11% of the canvas width to match the 11cqw in the preview!
+        const baseSize = canvas.width * 0.11;
+        const fontSize = Math.round(baseSize * sticker.scale);
+        ctx.font = `${fontSize}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(emoji, 0, 0);
       } else if (badgeText) {
-        ctx.font = `900 ${Math.round(48 * sticker.scale)}px "Space Grotesk", sans-serif`;
+        // Base size is 6.8% of the canvas width to match the 6.8cqw in the preview!
+        const baseSize = canvas.width * 0.068;
+        const fontSize = Math.round(baseSize * sticker.scale);
+        
+        ctx.font = `900 ${fontSize}px "Space Grotesk", "Inter", sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 10 * sticker.scale;
-        ctx.lineJoin = 'round';
-        ctx.strokeText(badgeText, 0, 0);
+        const textMetrics = ctx.measureText(badgeText);
+        const textWidth = textMetrics.width;
+        // Share Tech Mono / Space Grotesk caps height is approx 0.7 of font size
+        const textHeight = fontSize * 0.7; 
 
+        const padX = fontSize * 0.35;
+        const padY = fontSize * 0.15;
+        const rectWidth = textWidth + padX * 2;
+        const rectHeight = textHeight + padY * 2;
+        const rx = fontSize * 0.3; // border radius
+
+        const x = -rectWidth / 2;
+        const y = -rectHeight / 2;
+
+        // 1. Draw brutalist shadow
+        const shadowOffset = Math.max(3, canvas.width * 0.007) * sticker.scale;
+        ctx.fillStyle = '#000000';
+        drawRoundedRect(ctx, x + shadowOffset, y + shadowOffset, rectWidth, rectHeight, rx);
+        ctx.fill();
+
+        // 2. Draw background shape
         if (sticker.type.startsWith('badge-cute')) ctx.fillStyle = '#FFD6DE';
         else if (sticker.type.startsWith('badge-y2k')) ctx.fillStyle = '#00FFCC';
         else if (sticker.type.startsWith('badge-cool')) ctx.fillStyle = '#CFDEC0';
         else if (sticker.type.startsWith('badge-baby')) ctx.fillStyle = '#FFE5B4';
         else ctx.fillStyle = '#FFFFFF';
 
+        drawRoundedRect(ctx, x, y, rectWidth, rectHeight, rx);
+        ctx.fill();
+
+        // 3. Draw border outline
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = Math.max(2, canvas.width * 0.005) * sticker.scale;
+        drawRoundedRect(ctx, x, y, rectWidth, rectHeight, rx);
+        ctx.stroke();
+
+        // 4. Draw text inside
+        ctx.fillStyle = '#1C1917'; // dark stone/cream-900 color
         ctx.fillText(badgeText, 0, 0);
       }
 

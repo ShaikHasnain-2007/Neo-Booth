@@ -548,6 +548,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
   const [photosTaken, setPhotosTaken] = useState<string[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isMountedRef = useRef(true);
 
   // Pre-loaded SVG glasses and tulip images
   const filterImagesRef = useRef<{ aviators: HTMLImageElement | null; tulip: HTMLImageElement | null }>({
@@ -663,9 +664,15 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
         audio: false,
       });
 
+      if (!isMountedRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+
       streamRef.current = stream;
       setPermissionState('granted');
     } catch (err: any) {
+      if (!isMountedRef.current) return;
       console.error('Webcam access error:', err);
       setPermissionState('denied');
       setErrorMessage(
@@ -684,8 +691,10 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
   };
 
   useEffect(() => {
+    isMountedRef.current = true;
     startWebcam();
     return () => {
+      isMountedRef.current = false;
       stopWebcam();
       if (timerRef.current) clearTimeout(timerRef.current);
       if (intervalRef.current) clearInterval(intervalRef.current);
