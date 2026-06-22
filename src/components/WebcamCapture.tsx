@@ -826,7 +826,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
     return () => {
       cancelAnimationFrame(animationId);
     };
-  }, [activeFilters, hasLandmarker]);
+  }, [activeFilters, hasLandmarker, permissionState]);
 
   const captureFrame = useCallback((): string | null => {
     const canvas = canvasRef.current;
@@ -894,8 +894,8 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
   const isActive = phase !== 'idle';
 
   return (
-    <div className="flex flex-col items-center justify-center w-full max-w-2xl mx-auto">
-      <div className={`relative w-full aspect-[4/3] border-4 rounded-2xl shadow-neo overflow-hidden transition-all duration-300 ${isTraditional ? 'bg-black border-zinc-950' : 'bg-cream-900 border-cream-900'}`}>
+    <div className="flex flex-col lg:flex-row items-center justify-center gap-6 lg:gap-8 w-full max-w-4xl mx-auto">
+      <div className={`relative w-full max-w-2xl aspect-[4/3] border-4 rounded-2xl shadow-neo overflow-hidden transition-all duration-300 flex-shrink-0 ${isTraditional ? 'bg-black border-zinc-950' : 'bg-cream-900 border-cream-900'}`}>
 
         {permissionState === 'prompt' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-cream-100 p-6">
@@ -1154,13 +1154,13 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
       </div>
 
       {permissionState === 'granted' && (
-        <div className="mt-8 flex flex-col items-center gap-6 w-full">
+        <div className="flex flex-col items-center justify-center gap-5 p-5 bg-white border-3 border-cream-900 rounded-3xl shadow-neo w-full lg:w-72 flex-shrink-0">
           {!isActive && (
-            <div className="flex flex-col items-center gap-2">
-              <span className={`text-xs font-black uppercase tracking-wider ${isTraditional ? 'text-zinc-400' : 'text-cream-800/80'}`}>
+            <div className="flex flex-col items-center gap-2 w-full">
+              <span className={`text-xs font-black uppercase tracking-wider ${isTraditional ? 'text-zinc-500' : 'text-cream-800/80'}`}>
                 Countdown Delay
               </span>
-              <div className="flex gap-2 p-1.5 bg-cream-100/50 border-2 border-cream-900 rounded-xl">
+              <div className="flex justify-center gap-1.5 p-1 bg-cream-100/50 border-2 border-cream-900 rounded-xl w-full">
                 {[3, 5, 10].map((sec) => (
                   <button
                     key={sec}
@@ -1168,7 +1168,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
                       playClick();
                       setCountdownDuration(sec);
                     }}
-                    className={`px-4 py-1.5 rounded-lg font-bold text-sm transition-all ${
+                    className={`flex-1 py-1 rounded-lg font-bold text-xs transition-all cursor-pointer ${
                       countdownDuration === sec
                         ? 'bg-pastelpink-300 text-cream-900 border-2 border-cream-900 shadow-neo-sm translate-x-[-1px] translate-y-[-1px]'
                         : 'text-cream-800 hover:bg-cream-200/50 border-2 border-transparent'
@@ -1184,15 +1184,15 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
           {!isActive ? (
             <button
               onClick={startPhotoSession}
-              className="flex items-center gap-3 px-8 py-4 bg-pastelpink-200 text-cream-900 border-3 border-cream-900 rounded-2xl font-bold text-xl uppercase tracking-wide hover:bg-pastelpink-300 shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo-sm active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all group"
+              className="flex items-center justify-center gap-2.5 w-full py-3.5 bg-pastelpink-200 text-cream-900 border-3 border-cream-900 rounded-xl font-bold text-base uppercase tracking-wide hover:bg-pastelpink-300 shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo-sm active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all group cursor-pointer"
             >
-              <Camera className="w-6 h-6 transition-transform group-hover:rotate-12" />
-              Start Photo Session
+              <Camera className="w-5 h-5 transition-transform group-hover:rotate-12" />
+              Start Session
             </button>
           ) : (
-            <div className="px-6 py-3 bg-cream-100 border-2 border-cream-900 rounded-xl font-bold uppercase tracking-wider animate-pulse flex items-center gap-2">
+            <div className="w-full py-3 bg-cream-100 border-2 border-cream-900 rounded-xl font-bold uppercase tracking-wider animate-pulse flex items-center justify-center gap-2 text-sm text-center text-cream-700">
               <RefreshCw className="w-4 h-4 animate-spin" />
-              Photoshoot in progress...
+              Shoot in progress
             </div>
           )}
         </div>
