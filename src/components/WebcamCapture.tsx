@@ -1,11 +1,16 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Camera, RefreshCw, AlertTriangle, CheckCircle2, SwitchCamera } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { playBeep, playShutter, playClick } from '../utils/audioEngine';
-
-// MediaPipe facial landmark connections for procedural drawing
-const OVAL_INDEXES = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
-const LIPS_INDEXES = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95, 78];
+import { renderARFilters, getNoiseCanvases } from '../utils/arFilters';
+import type { FaceLandmarker, HandLandmarker } from '@mediapipe/tasks-vision';
+import type { 
+  ARFilter, 
+  NormalizedLandmark, 
+  PixelLandmark, 
+  HeartParticle, 
+  FilterImages 
+} from '../types/photobooth';
 
 interface WebcamCaptureProps {
   onCaptureComplete: (photos: string[]) => void;
@@ -14,522 +19,20 @@ interface WebcamCaptureProps {
 }
 
 type CapturePhase = 'idle' | 'countdown' | 'flash' | 'intermission';
-type ARFilter = 'aviators' | 'cyber-shades' | 'beauty-makeup' | 'heart-blush' | 'macbook-hearts' | 'noise' | 'tulip';
 
-// Pre-generate static noise patterns for fast tiling overlay
-let noiseCanvases: HTMLCanvasElement[] = [];
-function getNoiseCanvases() {
-  if (noiseCanvases.length > 0) return noiseCanvases;
-  if (typeof document === 'undefined') return [];
-  const NOISE_SIZE = 128;
-  for (let i = 0; i < 4; i++) {
-    const c = document.createElement('canvas');
-    c.width = NOISE_SIZE;
-    c.height = NOISE_SIZE;
-    const nCtx = c.getContext('2d');
-    if (nCtx) {
-      const imgData = nCtx.createImageData(NOISE_SIZE, NOISE_SIZE);
-      const data = imgData.data;
-      for (let j = 0; j < data.length; j += 4) {
-        const val = Math.floor(Math.random() * 255);
-        data[j] = val;
-        data[j+1] = val;
-        data[j+2] = val;
-        data[j+3] = 22; // subtle opacity for grain (approx 8.6%)
-      }
-      nCtx.putImageData(imgData, 0, 0);
-      noiseCanvases.push(c);
-    }
-  }
-  return noiseCanvases;
-}
-
-
-
-function drawHeart(
-  ctx: CanvasRenderingContext2D,
-  c_x: number,
-  c_y: number,
-  size: number,
-  fillStyle: string,
-  shadowColor?: string,
-  shadowBlur: number = 0,
-  rotation: number = 0
-) {
-  ctx.save();
-  ctx.translate(c_x, c_y);
-  ctx.rotate(rotation);
-  
-  const r = size / 2;
-  ctx.beginPath();
-  ctx.moveTo(0, -r * 0.3);
-  
-  // Left half (smooth curves like standard emoji ❤️)
-  ctx.bezierCurveTo(-r * 0.5, -r * 0.85, -r, -r * 0.4, -r, r * 0.1);
-  ctx.bezierCurveTo(-r, r * 0.45, -r * 0.45, r * 0.85, 0, r);
-  
-  // Right half (smooth curves like standard emoji ❤️)
-  ctx.bezierCurveTo(r * 0.45, r * 0.85, r, r * 0.45, r, r * 0.1);
-  ctx.bezierCurveTo(r, -r * 0.4, r * 0.5, -r * 0.85, 0, -r * 0.3);
-  
-  ctx.closePath();
-
-  ctx.fillStyle = fillStyle;
-  if (shadowColor) {
-    ctx.shadowColor = shadowColor;
-    ctx.shadowBlur = shadowBlur;
-  }
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawFilters(
-  ctx: CanvasRenderingContext2D,
-  landmarks: any[],
-  activeFilters: ARFilter[],
-  images: { aviators: HTMLImageElement | null; tulip: HTMLImageElement | null },
-  floatingHeartsRef: React.MutableRefObject<any[]>,
-  lastHandHeartSpawnTimeRef: React.MutableRefObject<number>,
-  rawHandmarks: any[][] | null,
-  dims: { width: number; height: number },
-  crop: { sx: number; sy: number; sWidth: number; sHeight: number; targetW: number; targetH: number }
-) {
-  ctx.save();
-
-  // Draw selected face filters
-  if (activeFilters.length > 0 && landmarks.length > 0) {
-    // 1. Draw SVG Sunglasses Filters (Aviators)
-    if (activeFilters.includes('aviators')) {
-      const noseBridge = landmarks[168];
-      const leftEyeOuter = landmarks[130];
-      const rightEyeOuter = landmarks[359];
-
-      const img = images.aviators;
-
-      if (noseBridge && leftEyeOuter && rightEyeOuter && img && img.complete) {
-        ctx.save();
-        const dx = rightEyeOuter.x - leftEyeOuter.x;
-        const dy = rightEyeOuter.y - leftEyeOuter.y;
-        const angle = Math.atan2(dy, dx);
-        const eyeDistance = Math.sqrt(dx * dx + dy * dy);
-
-        ctx.translate(noseBridge.x, noseBridge.y);
-        ctx.rotate(angle);
-
-        // Lower glasses significantly to fit perfectly over the eyes
-        ctx.translate(0, eyeDistance * 0.15);
-
-        // Width and Height scaled precisely to head dimensions
-        const w = eyeDistance * 1.8;
-        const h = w * 0.4;
-
-        ctx.drawImage(img, -w / 2, -h / 2, w, h);
-        ctx.restore();
-      }
-    }
-
-    // 2. Draw Cyber Shades Filter (Procedural Neon Cyber Visor)
-    if (activeFilters.includes('cyber-shades')) {
-      const noseBridge = landmarks[168];
-      const leftEyeOuter = landmarks[130];
-      const rightEyeOuter = landmarks[359];
-
-      if (noseBridge && leftEyeOuter && rightEyeOuter) {
-        ctx.save();
-        const dx = rightEyeOuter.x - leftEyeOuter.x;
-        const dy = rightEyeOuter.y - leftEyeOuter.y;
-        const angle = Math.atan2(dy, dx);
-        const eyeDistance = Math.sqrt(dx * dx + dy * dy);
-
-        ctx.translate(noseBridge.x, noseBridge.y);
-        ctx.rotate(angle);
-
-        // Lift visor to align perfectly with the eyes
-        ctx.translate(0, eyeDistance * 0.07);
-
-        // Slightly smaller width and height for a perfect fit
-        const w = eyeDistance * 1.6;
-        const h = w * 0.35;
-
-        // Draw Visor Body
-        const gradient = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
-        gradient.addColorStop(0, 'rgba(255, 0, 128, 0.85)'); // Hot Pink
-        gradient.addColorStop(0.5, 'rgba(128, 0, 128, 0.7)'); // Deep Purple
-        gradient.addColorStop(1, 'rgba(0, 0, 128, 0.85)'); // Midnight Blue
-
-        ctx.fillStyle = gradient;
-        ctx.strokeStyle = 'rgba(0, 255, 204, 0.9)'; // Neon Teal Border
-        ctx.lineWidth = 3.5;
-        ctx.shadowColor = 'rgba(0, 255, 204, 0.8)';
-        ctx.shadowBlur = 10;
-
-        // Draw custom angular shape for Y2K visor
-        ctx.beginPath();
-        ctx.moveTo(-w * 0.5, -h * 0.4); // Top-left
-        ctx.lineTo(w * 0.5, -h * 0.4);  // Top-right
-        ctx.lineTo(w * 0.45, h * 0.4);  // Bottom-right
-        ctx.lineTo(w * 0.1, h * 0.4);   // Nose notch right
-        ctx.lineTo(0, h * 0.15);         // Nose notch top center
-        ctx.lineTo(-w * 0.1, h * 0.4);  // Nose notch left
-        ctx.lineTo(-w * 0.45, h * 0.4); // Bottom-left
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-
-        // Draw cool tech HUD details on visor
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-        ctx.lineWidth = 1;
-        ctx.shadowBlur = 0; // Disable shadow for details
-
-        // Horizontal scanlines & diagonal slash (both clipped to visor shape)
-        ctx.save();
-        ctx.clip();
-        
-        ctx.beginPath();
-        for (let yOffset = -h; yOffset < h; yOffset += 6) {
-          ctx.moveTo(-w, yOffset);
-          ctx.lineTo(w, yOffset);
-        }
-        ctx.stroke();
-
-        // Cyber diagonal slash highlight
-        const highlightGrad = ctx.createLinearGradient(-w * 0.3, 0, w * 0.3, 0);
-        highlightGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-        highlightGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.3)');
-        highlightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-        ctx.fillStyle = highlightGrad;
-        ctx.beginPath();
-        ctx.moveTo(-w, -h);
-        ctx.lineTo(-w * 0.2, -h);
-        ctx.lineTo(w * 0.2, h);
-        ctx.lineTo(-w, h);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.restore(); // Restores clip state
-        ctx.restore(); // Restores translate/rotate state
-      }
-    }
-
-    // 4. Draw Beauty Makeup Filter
-    if (activeFilters.includes('beauty-makeup')) {
-      const leftCheek = landmarks[205];
-      const rightCheek = landmarks[425];
-      const nose = landmarks[4];
-      const forehead = landmarks[10];
-
-      let faceSize = 50;
-      if (nose && forehead) {
-        faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.65;
-      }
-
-      // A. Skin Smoothing: Clip to face shape and apply soft blur overlay
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(landmarks[OVAL_INDEXES[0]].x, landmarks[OVAL_INDEXES[0]].y);
-      for (let i = 1; i < OVAL_INDEXES.length; i++) {
-        ctx.lineTo(landmarks[OVAL_INDEXES[i]].x, landmarks[OVAL_INDEXES[i]].y);
-      }
-      ctx.closePath();
-      ctx.clip();
-
-      ctx.globalAlpha = 0.38; // Soft blending
-      ctx.filter = 'blur(4.5px) saturate(102%) brightness(101%)';
-      ctx.drawImage(ctx.canvas, 0, 0);
-      ctx.restore();
-
-      // B. Blended Cheek Blush
-      const drawBlendedBlush = (c_x: number, c_y: number, r: number) => {
-        const blushGrad = ctx.createRadialGradient(c_x, c_y, 0, c_x, c_y, r);
-        blushGrad.addColorStop(0, 'rgba(255, 80, 110, 0.11)');
-        blushGrad.addColorStop(0.5, 'rgba(255, 80, 110, 0.03)');
-        blushGrad.addColorStop(1, 'rgba(255, 80, 110, 0)');
-
-        ctx.fillStyle = blushGrad;
-        ctx.beginPath();
-        ctx.arc(c_x, c_y, r, 0, Math.PI * 2);
-        ctx.fill();
-      };
-
-      if (leftCheek) drawBlendedBlush(leftCheek.x, leftCheek.y, faceSize * 0.7);
-      if (rightCheek) drawBlendedBlush(rightCheek.x, rightCheek.y, faceSize * 0.7);
-
-      // C. Realistic Lip Gloss (Rose-red tint)
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(landmarks[LIPS_INDEXES[0]].x, landmarks[LIPS_INDEXES[0]].y);
-      for (let i = 1; i < LIPS_INDEXES.length; i++) {
-        ctx.lineTo(landmarks[LIPS_INDEXES[i]].x, landmarks[LIPS_INDEXES[i]].y);
-      }
-      ctx.closePath();
-
-      ctx.fillStyle = 'rgba(244, 63, 94, 0.14)'; // Translucent rose-tint
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(244, 63, 94, 0.2)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // 5. Draw Cute Heart Blush Filter
-    if (activeFilters.includes('heart-blush')) {
-      const leftCheek = landmarks[205];
-      const rightCheek = landmarks[425];
-      const nose = landmarks[4];
-      const forehead = landmarks[10];
-
-      let faceSize = 60;
-      if (nose && forehead) {
-        faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.6;
-      }
-
-      const drawSoftBlush = (c_x: number, c_y: number, r: number) => {
-        const blushGrad = ctx.createRadialGradient(c_x, c_y, 0, c_x, c_y, r);
-        blushGrad.addColorStop(0, 'rgba(255, 105, 180, 0.55)');
-        blushGrad.addColorStop(0.5, 'rgba(255, 105, 180, 0.2)');
-        blushGrad.addColorStop(1, 'rgba(255, 105, 180, 0)');
-
-        ctx.fillStyle = blushGrad;
-        ctx.beginPath();
-        ctx.arc(c_x, c_y, r, 0, Math.PI * 2);
-        ctx.fill();
-      };
-
-      if (leftCheek) {
-        drawSoftBlush(leftCheek.x, leftCheek.y, faceSize);
-        drawHeart(ctx, leftCheek.x, leftCheek.y - faceSize * 0.35, faceSize * 0.55, 'rgba(255, 51, 153, 0.85)', 'rgba(255, 51, 153, 0.8)', 10);
-      }
-      if (rightCheek) {
-        drawSoftBlush(rightCheek.x, rightCheek.y, faceSize);
-        drawHeart(ctx, rightCheek.x, rightCheek.y - faceSize * 0.35, faceSize * 0.55, 'rgba(255, 51, 153, 0.85)', 'rgba(255, 51, 153, 0.8)', 10);
-      }
-    }
-
-    // 6. Draw Tulip Filter (Plumeria flower on the temple / ear side)
-    if (activeFilters.includes('tulip')) {
-      const templePoint = landmarks[103] || landmarks[109]; // Right side of forehead / temple
-      const rightEar = landmarks[234] || landmarks[127]; // Outer right face edge
-      const img = images.tulip;
-
-      if (templePoint && rightEar && img && img.complete) {
-        ctx.save();
-        const nose = landmarks[4];
-        const forehead = landmarks[10];
-        let faceSize = 80;
-        if (nose && forehead) {
-          faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.6;
-        }
-
-        // Calculate rotation based on head tilt
-        const leftEyeOuter = landmarks[130];
-        const rightEyeOuter = landmarks[359];
-        let angle = 0;
-        if (leftEyeOuter && rightEyeOuter) {
-          const dx = rightEyeOuter.x - leftEyeOuter.x;
-          const dy = rightEyeOuter.y - leftEyeOuter.y;
-          angle = Math.atan2(dy, dx);
-        }
-
-        // Position the flower on the user's right temple (left side of canvas in mirror mode)
-        const x = templePoint.x - (templePoint.x - rightEar.x) * 0.2;
-        const y = templePoint.y + (rightEar.y - templePoint.y) * 0.1;
-
-        ctx.translate(x, y);
-        ctx.rotate(angle + 0.15); // Add a small natural tilt
-
-        const w = faceSize * 1.05;
-        const h = w;
-
-        ctx.drawImage(img, -w / 2, -h / 2, w, h);
-        ctx.restore();
-      }
-    }
-  }
-
-  // ALWAYS Draw & Update Floating Hearts Particle System (Forehead loop and Hand gestures)
-  const forehead = landmarks.length > 0 ? landmarks[10] : null;
-  const nose = landmarks.length > 0 ? landmarks[4] : null;
-  const faceSize = forehead && nose
-    ? Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.6
-    : 80; // fallback face size in pixels
-
-  const hearts = floatingHeartsRef.current;
-  
-  // Update state for all hearts (absolute hand particles and relative forehead particles)
-  hearts.forEach(p => {
-    if (p.originType === 'hand') {
-      p.y = (p.y || 0) - (p.speed || 3);
-      p.wobblePhase += p.wobbleSpeed;
-      p.rotation += p.rotationSpeed;
-      
-      if (p.scale < 1.0) {
-        p.scale = Math.min(1.0, p.scale + 0.08);
-      } else if (p.opacity < 0.35) {
-        p.scale = Math.max(0.1, p.scale - 0.05);
-      }
-      p.opacity -= 0.010; // float up and fade out absolute hand particles
-    } else {
-      p.yOffsetFactor -= p.speedFactor;
-      p.wobblePhase += p.wobbleSpeed;
-      p.rotation += p.rotationSpeed;
-      
-      if (p.scale < 1.0) {
-        p.scale = Math.min(1.0, p.scale + 0.10);
-      } else if (p.opacity < 0.35) {
-        p.scale = Math.max(0.1, p.scale - 0.05);
-      }
-      p.opacity -= 0.018; // float up and fade out relative forehead particles
-    }
-  });
-
-  // Filter out dead particles
-  floatingHeartsRef.current = hearts.filter(p => p.opacity > 0);
-
-  // Check for two-hand heart gesture (runs always!)
-  let gestureActive = false;
-  let hand_x = 0;
-  let hand_y = 0;
-  let handSize = faceSize * 0.8; // default hand size scaled relative to face
-
-  if (rawHandmarks && rawHandmarks.length >= 2) {
-    const mapHandPoint = (pt: any) => {
-      const x_pixel = ((pt.x * dims.width) - crop.sx) / crop.sWidth * crop.targetW;
-      const y_pixel = ((pt.y * dims.height) - crop.sy) / crop.sHeight * crop.targetH;
-      return { x: x_pixel, y: y_pixel };
-    };
-
-    const hand1 = rawHandmarks[0];
-    const hand2 = rawHandmarks[1];
-
-    if (hand1 && hand2 && hand1[8] && hand2[8] && hand1[4] && hand2[4]) {
-      const L_idx = mapHandPoint(hand1[8]);
-      const R_idx = mapHandPoint(hand2[8]);
-      const L_thb = mapHandPoint(hand1[4]);
-      const R_thb = mapHandPoint(hand2[4]);
-
-      // Geometric check for two-hand heart:
-      // 1. Index fingertips are touching/close
-      // 2. Thumb tips are touching/close
-      // 3. Index tips are higher up than thumb tips
-      // 4. Vertical volume exists between tips and thumbs
-      const dist_index = Math.sqrt(Math.pow(L_idx.x - R_idx.x, 2) + Math.pow(L_idx.y - R_idx.y, 2));
-      const dist_thumb = Math.sqrt(Math.pow(L_thb.x - R_thb.x, 2) + Math.pow(L_thb.y - R_thb.y, 2));
-      const vert_diff = Math.max(L_thb.y, R_thb.y) - Math.min(L_idx.y, R_idx.y);
-
-      if (dist_index < 70 && dist_thumb < 70 && vert_diff > 25 && L_idx.y < L_thb.y && R_idx.y < R_thb.y) {
-        gestureActive = true;
-        hand_x = (L_idx.x + R_idx.x + L_thb.x + R_thb.x) / 4;
-        hand_y = (L_idx.y + R_idx.y + L_thb.y + R_thb.y) / 4;
-
-        if (hand1[0] && hand1[9] && hand2[0] && hand2[9]) {
-          const hand1_wrist = mapHandPoint(hand1[0]);
-          const hand1_knuckle = mapHandPoint(hand1[9]);
-          const size1 = Math.sqrt(Math.pow(hand1_wrist.x - hand1_knuckle.x, 2) + Math.pow(hand1_wrist.y - hand1_knuckle.y, 2));
-
-          const hand2_wrist = mapHandPoint(hand2[0]);
-          const hand2_knuckle = mapHandPoint(hand2[9]);
-          const size2 = Math.sqrt(Math.pow(hand2_wrist.x - hand2_knuckle.x, 2) + Math.pow(hand2_wrist.y - hand2_knuckle.y, 2));
-
-          handSize = (size1 + size2) / 2;
-        }
-      }
-    }
-  }
-
-  // Spawn Forehead floating particles (if activeFilters has 'macbook-hearts' active)
-  if (activeFilters.includes('macbook-hearts') && forehead && nose) {
-    if (floatingHeartsRef.current.filter(p => p.originType !== 'hand').length < 18 && Math.random() < 0.12) {
-      floatingHeartsRef.current.push({
-        originType: 'forehead',
-        xOffsetFactor: (Math.random() - 0.5) * 3.4,
-        yOffsetFactor: -0.4 - Math.random() * 0.25,
-        speedFactor: 0.024 + Math.random() * 0.022,
-        sizeFactor: 0.35 + Math.random() * 0.18,
-        opacity: 1.0,
-        colorHue: 320 + Math.floor(Math.random() * 32),
-        wobbleSpeed: 0.03 + Math.random() * 0.04,
-        wobbleAmount: 0.12 + Math.random() * 0.18,
-        wobblePhase: Math.random() * Math.PI * 2,
-        rotation: (Math.random() - 0.5) * 0.8,
-        rotationSpeed: (Math.random() - 0.5) * 0.03,
-        scale: 0.1
-      });
-    }
-  }
-
-  // Spawn Hand Gesture particles (Exactly 1 heart per second, solid wine red, hand-sized)
-  if (gestureActive) {
-    const now = performance.now();
-    if (now - lastHandHeartSpawnTimeRef.current > 1000) {
-      lastHandHeartSpawnTimeRef.current = now;
-
-      if (floatingHeartsRef.current.length < 50) {
-        floatingHeartsRef.current.push({
-          originType: 'hand',
-          x: hand_x,
-          y: hand_y,
-          speed: 1.8 + Math.random() * 0.8, // gentle upward float speed (pixels per frame)
-          size: handSize * (0.85 + Math.random() * 0.15), // solid hand-sized heart (proportional to hands size)
-          opacity: 1.0,
-          colorHue: 345, // Wine red hue base
-          wobbleSpeed: 0.02 + Math.random() * 0.02,
-          wobbleAmt: 8 + Math.random() * 8, // absolute pixel wobble width
-          wobblePhase: Math.random() * Math.PI * 2,
-          rotation: (Math.random() - 0.5) * 0.4, // slight initial tilt
-          rotationSpeed: (Math.random() - 0.5) * 0.01,
-          scale: 0.1,
-          xOffsetFactor: 0,
-          yOffsetFactor: 0,
-          speedFactor: 0,
-          sizeFactor: 0
-        });
-      }
-    }
-  }
-
-  // Draw all active hearts
-  floatingHeartsRef.current.forEach(p => {
-    let c_x = 0;
-    let c_y = 0;
-    let size = 0;
-
-    if (p.originType === 'hand') {
-      const wobbleX = Math.sin(p.wobblePhase) * (p.wobbleAmt || 10);
-      c_x = (p.x || 0) + wobbleX;
-      c_y = p.y || 0;
-      size = (p.size || 30) * p.scale;
-    } else if (forehead && nose) {
-      const wobbleX = Math.sin(p.wobblePhase) * p.wobbleAmount;
-      c_x = forehead.x + (p.xOffsetFactor + wobbleX) * faceSize;
-      c_y = forehead.y + p.yOffsetFactor * faceSize;
-      size = p.sizeFactor * faceSize * p.scale;
-    } else {
-      return; // Skip if forehead coordinates are missing
-    }
-
-    const isWineRed = p.originType === 'hand';
-    const fillStyle = isWineRed
-      ? `hsla(345, 85%, 28%, ${p.opacity})` // Solid wine red
-      : `hsla(${p.colorHue}, 100%, 68%, ${p.opacity * 0.70})`;
-    const shadowColor = isWineRed
-      ? `hsla(345, 85%, 20%, ${p.opacity * 0.60})`
-      : `hsla(${p.colorHue}, 100%, 68%, ${p.opacity * 0.50})`;
-    
-    drawHeart(ctx, c_x, c_y, size, fillStyle, shadowColor, 8, p.rotation);
-  });
-
-  ctx.restore();
-}
-
-export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete, photoCount, isTraditional }) => {
+export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ 
+  onCaptureComplete, 
+  photoCount, 
+  isTraditional 
+}) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   
-  const landmarkerRef = useRef<any>(null);
-  const handLandmarkerRef = useRef<any>(null);
-  const lastLandmarksRef = useRef<any>(null);
-  const lastHandmarksRef = useRef<any>(null);
+  const landmarkerRef = useRef<FaceLandmarker | null>(null);
+  const handLandmarkerRef = useRef<HandLandmarker | null>(null);
+  const lastLandmarksRef = useRef<NormalizedLandmark[] | null>(null);
+  const lastHandmarksRef = useRef<NormalizedLandmark[][] | null>(null);
   const lastDimensionsRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
 
   const [permissionState, setPermissionState] = useState<'prompt' | 'granted' | 'denied'>('prompt');
@@ -537,6 +40,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
   const [isModelLoading, setIsModelLoading] = useState(true);
   const [activeFilters, setActiveFilters] = useState<ARFilter[]>([]);
   const [hasLandmarker, setHasLandmarker] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
 
   const [phase, setPhase] = useState<CapturePhase>('idle');
   const [countdownDuration, setCountdownDuration] = useState(3);
@@ -551,34 +55,13 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
   const isMountedRef = useRef(true);
 
   // Pre-loaded SVG glasses and tulip images
-  const filterImagesRef = useRef<{ aviators: HTMLImageElement | null; tulip: HTMLImageElement | null }>({
+  const filterImagesRef = useRef<FilterImages>({
     aviators: null,
     tulip: null
   });
 
-  // Floating heart particles state for MacBook photo effect
-  const floatingHeartsRef = useRef<{
-    xOffsetFactor: number;
-    yOffsetFactor: number;
-    speedFactor: number;
-    sizeFactor: number;
-    opacity: number;
-    colorHue: number;
-    wobbleSpeed: number;
-    wobbleAmount: number;
-    wobblePhase: number;
-    rotation: number;
-    rotationSpeed: number;
-    scale: number;
-    // Gesture parameters for hand-based heart emissions
-    originType?: 'forehead' | 'hand';
-    x?: number;
-    y?: number;
-    speed?: number;
-    wobbleAmt?: number;
-    size?: number;
-  }[]>([]);
-
+  // Floating heart particles state
+  const floatingHeartsRef = useRef<HeartParticle[]>([]);
   const lastHandHeartSpawnTimeRef = useRef<number>(0);
 
   // Preload assets on mount
@@ -602,7 +85,6 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm"
         );
         
-        // Load both models in parallel for maximum performance
         const [faceLandmarker, handLandmarker] = await Promise.all([
           vision.FaceLandmarker.createFromOptions(filesetResolver, {
             baseOptions: {
@@ -648,16 +130,21 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
     };
   }, []);
 
-  const startWebcam = async () => {
+  const stopWebcam = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+  }, []);
+
+  const startWebcam = useCallback(async () => {
     setErrorMessage('');
     try {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
+      stopWebcam();
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: 'user',
+          facingMode: facingMode,
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
@@ -671,35 +158,34 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
 
       streamRef.current = stream;
       setPermissionState('granted');
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (!isMountedRef.current) return;
       console.error('Webcam access error:', err);
       setPermissionState('denied');
+      const errorObj = err as Error;
       setErrorMessage(
-        err.name === 'NotAllowedError'
+        errorObj.name === 'NotAllowedError'
           ? 'Camera access denied. Please enable camera permissions in your browser settings.'
           : 'Could not access camera. Please check if another app is using it.'
       );
     }
-  };
+  }, [facingMode, stopWebcam]);
 
-  const stopWebcam = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-  };
-
+  // Handle camera mount and facingMode updates
   useEffect(() => {
     isMountedRef.current = true;
-    startWebcam();
+    const initTimer = setTimeout(() => {
+      void startWebcam();
+    }, 0);
+
     return () => {
       isMountedRef.current = false;
+      clearTimeout(initTimer);
       stopWebcam();
       if (timerRef.current) clearTimeout(timerRef.current);
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, []);
+  }, [facingMode, startWebcam, stopWebcam]);
 
   useEffect(() => {
     if (permissionState === 'granted' && streamRef.current && videoRef.current) {
@@ -732,7 +218,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
 
         ctx.clearRect(0, 0, targetW, targetH);
 
-        // Aspect ratio crop (from camera stream 16:9 to photobooth 4:3)
+        // Aspect ratio crop (camera stream to photobooth 4:3)
         const videoAspectRatio = videoW / videoH;
         const targetAspectRatio = targetW / targetH;
 
@@ -786,18 +272,19 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
           }
         }
 
-        // Render AR Filters and Hand Gestures (runs always when camera is active)
+        // Render AR Filters and Hand Gestures
         const cachedLandmarks = lastLandmarksRef.current;
         const dims = lastDimensionsRef.current;
         if (dims.width > 0 && dims.height > 0) {
-          const mappedLandmarks = cachedLandmarks
-            ? cachedLandmarks.map((pt: any) => {
+          const mappedLandmarks: PixelLandmark[] = cachedLandmarks
+            ? cachedLandmarks.map((pt) => {
                 const x_pixel = ((pt.x * dims.width) - sx) / sWidth * targetW;
                 const y_pixel = ((pt.y * dims.height) - sy) / sHeight * targetH;
                 return { x: x_pixel, y: y_pixel, z: pt.z };
               })
             : [];
-          drawFilters(
+          
+          renderARFilters(
             ctx,
             mappedLandmarks,
             activeFilters,
@@ -810,7 +297,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
           );
         }
 
-        // Draw Screen Overlays (e.g. Noise filter) that do not depend on landmarks
+        // Draw Screen Overlays (e.g. Noise filter)
         if (activeFilters.includes('noise')) {
           ctx.save();
           ctx.globalCompositeOperation = 'source-over';
@@ -840,18 +327,21 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
   const captureFrame = useCallback((): string | null => {
     const canvas = canvasRef.current;
     if (!canvas || !streamRef.current) return null;
-    // Captures the complete canvas context including the active AR filter!
     return canvas.toDataURL('image/png');
   }, []);
 
-  const runCountdownForPhoto = useCallback((index: number) => {
+  // Photoshoot sequence controller avoiding recursive closure references
+  const stepCountdownRef = useRef<(index: number) => void>(() => {});
+
+  const runCountdownStep = useCallback((index: number) => {
     setPhotoIndex(index);
     setCountdown(countdownDuration);
     setPhase('countdown');
 
     let count = countdownDuration;
     playBeep(800, 0.08);
-    
+
+    if (intervalRef.current) clearInterval(intervalRef.current);
     intervalRef.current = setInterval(() => {
       count -= 1;
       if (count > 0) {
@@ -879,7 +369,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
           if (nextIndex < photoCount) {
             setPhase('intermission');
             timerRef.current = setTimeout(() => {
-              runCountdownForPhoto(nextIndex);
+              stepCountdownRef.current(nextIndex);
             }, 2500);
           } else {
             setPhase('intermission');
@@ -891,13 +381,35 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
         }, 200);
       }
     }, 1000);
-  }, [captureFrame, onCaptureComplete, countdownDuration, photoCount]);
+  }, [captureFrame, countdownDuration, onCaptureComplete, photoCount]);
 
-  const startPhotoSession = () => {
+  useEffect(() => {
+    stepCountdownRef.current = runCountdownStep;
+  }, [runCountdownStep]);
+
+  const startPhotoSession = useCallback(() => {
+    if (phase !== 'idle') return;
     playClick();
     photosRef.current = [];
     setPhotosTaken([]);
-    runCountdownForPhoto(0);
+    runCountdownStep(0);
+  }, [phase, runCountdownStep]);
+
+  // Spacebar shortcut to start photoshoot
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && phase === 'idle' && permissionState === 'granted') {
+        e.preventDefault();
+        startPhotoSession();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [phase, permissionState, startPhotoSession]);
+
+  const toggleCameraFacing = () => {
+    playClick();
+    setFacingMode(prev => (prev === 'user' ? 'environment' : 'user'));
   };
 
   const isActive = phase !== 'idle';
@@ -927,8 +439,8 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
             <h3 className="text-xl font-bold uppercase tracking-wider mb-2 text-pastelpink-400">Camera Access Blocked</h3>
             <p className="text-center text-sm text-cream-200 max-w-md mb-6">{errorMessage}</p>
             <button
-              onClick={startWebcam}
-              className="px-6 py-2 bg-cream-50 text-cream-900 border-2 border-cream-900 rounded-xl font-bold uppercase hover:bg-pastelpink-100 hover:text-pastelpink-500 shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all"
+              onClick={() => void startWebcam()}
+              className="px-6 py-2 bg-cream-50 text-cream-900 border-2 border-cream-900 rounded-xl font-bold uppercase hover:bg-pastelpink-100 hover:text-pastelpink-500 shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer"
             >
               Try Again
             </button>
@@ -954,7 +466,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
               ref={canvasRef}
               width={800}
               height={600}
-              className="w-full h-full object-cover scale-x-[-1] relative z-10"
+              className={`w-full h-full object-cover relative z-10 ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
             />
 
             <div 
@@ -970,7 +482,16 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
                   <span className="text-[9px] opacity-75 font-semibold">0:02:14</span>
                 </div>
                 
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-2 pointer-events-auto">
+                  <button
+                    onClick={toggleCameraFacing}
+                    title="Switch Camera (Front/Back)"
+                    className="p-1.5 bg-black/60 hover:bg-black/80 border border-white/40 rounded-lg text-white text-xs flex items-center gap-1 shadow-sm backdrop-blur-sm cursor-pointer transition-all active:scale-95"
+                  >
+                    <SwitchCamera className="w-3.5 h-3.5" />
+                    <span className="text-[9px] font-mono">{facingMode === 'user' ? 'Front' : 'Back'}</span>
+                  </button>
+
                   <div className="border border-white w-9 h-4 p-0.5 rounded-sm relative flex items-center gap-0.5">
                     <div className="bg-white h-full w-2.5" />
                     <div className="bg-white h-full w-2.5" />
@@ -995,7 +516,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
               <div className="absolute inset-0 bg-scanlines pointer-events-none opacity-[0.03]" />
             </div>
 
-            {/* Snapchat-Style AR Filter Lenses (Interactive in idle and photoshoot intermission) */}
+            {/* Snapchat-Style AR Filter Lenses */}
             {(phase === 'idle' || phase === 'intermission') && !isModelLoading && hasLandmarker && (
               <div className="absolute bottom-16 left-0 right-0 flex justify-center gap-3 z-50">
                 {[
@@ -1026,13 +547,11 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
                               return prev.filter((id) => id !== targetId);
                             } else {
                               let updated = [...prev];
-                              // Eyewear mutual exclusion
                               if (targetId === 'aviators') {
                                 updated = updated.filter((id) => id !== 'cyber-shades');
                               } else if (targetId === 'cyber-shades') {
                                 updated = updated.filter((id) => id !== 'aviators');
                               }
-                              // Blush mutual exclusion
                               if (targetId === 'beauty-makeup') {
                                 updated = updated.filter((id) => id !== 'heart-blush');
                               } else if (targetId === 'heart-blush') {
@@ -1152,7 +671,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
             <div className={`absolute bottom-4 left-4 right-4 backdrop-blur-sm border-2 rounded-xl px-4 py-2 flex items-center justify-between z-30 shadow-neo-sm ${isTraditional ? 'bg-zinc-900/95 text-white border-zinc-700' : 'bg-cream-50/90 text-cream-900 border-cream-900'}`}>
               <span className={`font-bold text-xs uppercase tracking-wider flex items-center gap-2 ${isTraditional ? 'text-white' : 'text-cream-900'}`}>
                 <span className={`w-2.5 h-2.5 rounded-full ${isActive ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'}`} />
-                {isActive ? `Photo ${photoIndex + 1} of ${photoCount}` : 'Ready to shoot'}
+                {isActive ? `Photo ${photoIndex + 1} of ${photoCount}` : 'Ready to shoot (Press Space)'}
               </span>
               <span className={`font-mono text-xs font-bold ${isTraditional ? 'text-white/80' : 'text-cream-900'}`}>
                 {photosTaken.length} / {photoCount} captured
@@ -1191,13 +710,18 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onCaptureComplete,
           )}
 
           {!isActive ? (
-            <button
-              onClick={startPhotoSession}
-              className="flex items-center justify-center gap-2.5 w-full py-3.5 bg-pastelpink-200 text-cream-900 border-3 border-cream-900 rounded-xl font-bold text-base uppercase tracking-wide hover:bg-pastelpink-300 shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo-sm active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all group cursor-pointer"
-            >
-              <Camera className="w-5 h-5 transition-transform group-hover:rotate-12" />
-              Start Session
-            </button>
+            <div className="w-full flex flex-col gap-2">
+              <button
+                onClick={startPhotoSession}
+                className="flex items-center justify-center gap-2.5 w-full py-3.5 bg-pastelpink-200 text-cream-900 border-3 border-cream-900 rounded-xl font-bold text-base uppercase tracking-wide hover:bg-pastelpink-300 shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo-sm active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all group cursor-pointer"
+              >
+                <Camera className="w-5 h-5 transition-transform group-hover:rotate-12" />
+                Start Session
+              </button>
+              <p className="text-[10px] font-mono text-center text-cream-400 uppercase">
+                ✦ Press Spacebar to shoot ✦
+              </p>
+            </div>
           ) : (
             <div className="w-full py-3 bg-cream-100 border-2 border-cream-900 rounded-xl font-bold uppercase tracking-wider animate-pulse flex items-center justify-center gap-2 text-sm text-center text-cream-700">
               <RefreshCw className="w-4 h-4 animate-spin" />

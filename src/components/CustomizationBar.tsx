@@ -1,6 +1,31 @@
 import React, { useState } from 'react';
-import { Calendar, FlipHorizontal, Eye, Smile, Trash2, Sliders, Volume2, VolumeX, Type, Layers, Check } from 'lucide-react';
-import type { StitchOptions, StickerInstance } from '../utils/canvasStitcher';
+import { 
+  Calendar, 
+  FlipHorizontal, 
+  Eye, 
+  Smile, 
+  Trash2, 
+  Sliders, 
+  Volume2, 
+  VolumeX, 
+  Type, 
+  Layers, 
+  Check, 
+  PenTool, 
+  RotateCcw, 
+  Sparkles, 
+  Camera, 
+  Undo2 
+} from 'lucide-react';
+import type { StitchOptions, StickerInstance } from '../types/photobooth';
+import { 
+  colorSwatches, 
+  filterOptions, 
+  patternOptions, 
+  stickersList, 
+  badgeStylesList, 
+  doodleBrushes 
+} from '../constants/photobooth';
 
 interface CustomizationBarProps {
   options: StitchOptions;
@@ -14,53 +39,22 @@ interface CustomizationBarProps {
   onAddCustomTextSticker: (text: string, style: string) => void;
   soundEnabled: boolean;
   onToggleSound: () => void;
+  // Pose Retake Props
+  photos: string[];
+  onRetakePose: (index: number) => void;
+  // Purikura Doodle Props
+  doodleActive: boolean;
+  onToggleDoodle: () => void;
+  doodleColor: string;
+  onChangeDoodleColor: (color: string) => void;
+  doodleSize: number;
+  onChangeDoodleSize: (size: number) => void;
+  doodleGlow: boolean;
+  onToggleDoodleGlow: () => void;
+  hasDoodles: boolean;
+  onUndoDoodle: () => void;
+  onClearDoodles: () => void;
 }
-
-export const colorSwatches = [
-  { name: 'White', value: '#FFFFFF', class: 'bg-white border-cream-200' },
-  { name: 'Pitch Black', value: '#18181B', class: 'bg-zinc-900 border-zinc-700' },
-  { name: 'Maroon Red', value: '#5C0617', class: 'bg-[#5C0617] border-[#3D020D]' },
-  { name: 'Pastel Pink', value: '#FFD6DE', class: 'bg-[#FFD6DE] border-[#FFA3B5]' },
-  { name: 'Sage Green', value: '#CFDEC0', class: 'bg-[#CFDEC0] border-[#A3BE91]' },
-];
-
-export const filterOptions = [
-  { id: 'none', name: 'Normal' },
-  { id: 'grayscale', name: 'B&W Retro' },
-  { id: 'sepia', name: 'Warm Sepia' },
-  { id: 'high-contrast', name: 'Noir Contrast' },
-  { id: 'vintage', name: 'Y2K Vintage' },
-  { id: 'analog-film', name: 'Analog Film' },
-  { id: 'custom', name: 'Custom Mix' },
-] as const;
-
-export const patternOptions = [
-  { id: 'none', name: 'Solid Frame' },
-  { id: 'checkerboard', name: 'Checkerboard' },
-  { id: 'stars', name: 'Y2K Stars' },
-  { id: 'cherries', name: 'Cherries' },
-  { id: 'hologradient', name: 'Holo Gradient' },
-] as const;
-
-export const stickersList = [
-  { id: 'heart', emoji: '💖', label: 'Heart', type: 'emoji' },
-  { id: 'star', emoji: '⭐', label: 'Star', type: 'emoji' },
-  { id: 'sparkles', emoji: '✨', label: 'Sparkle', type: 'emoji' },
-  { id: 'cherry', emoji: '🍒', label: 'Cherry', type: 'emoji' },
-  { id: 'sunglasses', emoji: '🕶️', label: 'Shades', type: 'emoji' },
-  { id: 'butterfly', emoji: '🦋', label: 'Butterfly', type: 'emoji' },
-  { id: 'alien', emoji: '👾', label: 'Alien', type: 'emoji' },
-  { id: 'flower', emoji: '🌸', label: 'Flower', type: 'emoji' },
-  { id: 'lightning', emoji: '⚡', label: 'Volt', type: 'emoji' },
-  { id: 'teddy', emoji: '🧸', label: 'Teddy', type: 'emoji' },
-];
-
-export const badgeStylesList = [
-  { id: 'badge-cute', name: 'Cute Pink', bg: '#FFD6DE' },
-  { id: 'badge-y2k', name: 'Y2K Cyan', bg: '#00FFCC' },
-  { id: 'badge-cool', name: 'Cool Sage', bg: '#CFDEC0' },
-  { id: 'badge-baby', name: 'Baby Peach', bg: '#FFE5B4' },
-];
 
 export const CustomizationBar: React.FC<CustomizationBarProps> = ({
   options,
@@ -74,6 +68,19 @@ export const CustomizationBar: React.FC<CustomizationBarProps> = ({
   onAddCustomTextSticker,
   soundEnabled,
   onToggleSound,
+  photos,
+  onRetakePose,
+  doodleActive,
+  onToggleDoodle,
+  doodleColor,
+  onChangeDoodleColor,
+  doodleSize,
+  onChangeDoodleSize,
+  doodleGlow,
+  onToggleDoodleGlow,
+  hasDoodles,
+  onUndoDoodle,
+  onClearDoodles,
 }) => {
   const [customText, setCustomText] = useState('');
   const [customTextStyle, setCustomTextStyle] = useState('badge-cute');
@@ -109,6 +116,46 @@ export const CustomizationBar: React.FC<CustomizationBarProps> = ({
         </span>
       </h3>
 
+      {/* Individual Pose Retake Tray */}
+      {photos.length > 0 && (
+        <div className="flex flex-col gap-2 p-3 bg-cream-50/70 border-2 border-cream-900 rounded-2xl shadow-neo-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-cream-900 flex items-center gap-1.5">
+              <Camera className="w-3.5 h-3.5 text-pastelpink-500" />
+              Retake Individual Poses
+            </span>
+            <span className="text-[10px] font-mono text-cream-400 uppercase">
+              {photos.length} captured
+            </span>
+          </div>
+
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {photos.map((photo, i) => (
+              <div key={i} className="relative group flex-shrink-0">
+                <img
+                  src={photo}
+                  alt={`Pose ${i + 1}`}
+                  className="w-14 h-11 object-cover rounded-lg border-2 border-cream-900 shadow-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => onRetakePose(i)}
+                  title={`Retake Pose #${i + 1}`}
+                  className="absolute inset-0 bg-cream-900/80 rounded-lg text-white font-bold text-[9px] uppercase flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 mb-0.5" />
+                  Retake
+                </button>
+                <span className="absolute bottom-0.5 right-1 text-[8px] font-mono font-bold text-white bg-black/60 px-1 rounded">
+                  #{i + 1}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Layout Info */}
       <div className="flex flex-col gap-1">
         <span className="text-xs font-mono uppercase tracking-widest text-cream-400">Current Layout</span>
         <div className="px-3 py-2 bg-cream-50 border-2 border-cream-900 rounded-xl font-bold text-xs uppercase text-cream-900">
@@ -116,6 +163,98 @@ export const CustomizationBar: React.FC<CustomizationBarProps> = ({
         </div>
       </div>
 
+      {/* Purikura Neon Doodle Pen Tool */}
+      <div className="flex flex-col gap-3 border-t-2 border-cream-100 pt-3">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-bold uppercase tracking-wider text-cream-900 flex items-center gap-1.5">
+            <PenTool className="w-4 h-4 text-pastelpink-500" />
+            Purikura Neon Brush
+          </span>
+          <button
+            type="button"
+            onClick={onToggleDoodle}
+            className={`px-3 py-1.5 border-2 border-cream-900 rounded-xl text-xs font-bold uppercase transition-all shadow-neo-sm hover:translate-y-[1px] cursor-pointer flex items-center gap-1.5 ${
+              doodleActive
+                ? 'bg-pastelpink-300 text-cream-900 ring-2 ring-pink-400 shadow-none'
+                : 'bg-cream-50 hover:bg-cream-100 text-cream-700'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            {doodleActive ? 'Drawing Active' : 'Enable Pen'}
+          </button>
+        </div>
+
+        {doodleActive && (
+          <div className="p-3 bg-cream-50 border-2 border-cream-900 rounded-2xl flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-mono text-cream-500 uppercase">Neon Palette</span>
+              <label className="flex items-center gap-1.5 text-[10px] font-bold uppercase text-cream-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={doodleGlow}
+                  onChange={onToggleDoodleGlow}
+                  className="w-3.5 h-3.5 accent-pink-500 rounded"
+                />
+                Glow Effect
+              </label>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {doodleBrushes.map((brush) => (
+                <button
+                  key={brush.id}
+                  type="button"
+                  onClick={() => onChangeDoodleColor(brush.color)}
+                  style={{ backgroundColor: brush.color }}
+                  title={brush.name}
+                  className={`w-7 h-7 rounded-full border-2 border-cream-900 shadow-neo-sm transition-transform cursor-pointer ${
+                    doodleColor === brush.color ? 'scale-120 ring-3 ring-pink-500' : 'hover:scale-105'
+                  }`}
+                />
+              ))}
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between text-[10px] font-mono uppercase text-cream-600">
+                <span>Brush Size</span>
+                <span>{doodleSize}px</span>
+              </div>
+              <input
+                type="range"
+                min="2"
+                max="16"
+                step="1"
+                value={doodleSize}
+                onChange={(e) => onChangeDoodleSize(parseInt(e.target.value))}
+                className="w-full accent-cream-900 h-1.5 bg-cream-200 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+
+            {hasDoodles && (
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={onUndoDoodle}
+                  className="flex-1 py-1.5 bg-white hover:bg-cream-100 border-2 border-cream-900 rounded-xl text-xs font-bold uppercase flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Undo2 className="w-3.5 h-3.5" />
+                  Undo
+                </button>
+                <button
+                  type="button"
+                  onClick={onClearDoodles}
+                  className="flex-1 py-1.5 bg-white hover:bg-red-50 text-red-500 border-2 border-red-400 rounded-xl text-xs font-bold uppercase flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Clear Pen
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Frame Design Section */}
       {!isTraditional && (
         <div className="flex flex-col gap-3 border-t-2 border-cream-100 pt-3">
           <span className="text-sm font-bold uppercase tracking-wider text-cream-600 flex items-center gap-1.5">
@@ -161,6 +300,7 @@ export const CustomizationBar: React.FC<CustomizationBarProps> = ({
         </div>
       )}
 
+      {/* Photo Effects Section */}
       <div className="flex flex-col gap-2 border-t-2 border-cream-100 pt-3">
         <span className="text-sm font-bold uppercase tracking-wider text-cream-600">Photo Effects</span>
         <div className="flex flex-wrap gap-2">
@@ -180,6 +320,7 @@ export const CustomizationBar: React.FC<CustomizationBarProps> = ({
         </div>
       </div>
 
+      {/* Custom Sliders if Custom Filter selected */}
       {options.filter === 'custom' && (
         <div className="flex flex-col gap-3 p-3 bg-cream-50/50 border-2 border-cream-900 rounded-xl">
           <span className="text-xs font-mono uppercase tracking-widest text-cream-500">Custom Filter Sliders</span>
@@ -246,6 +387,7 @@ export const CustomizationBar: React.FC<CustomizationBarProps> = ({
         </div>
       )}
 
+      {/* Lens & Glitch Filters */}
       <div className="flex flex-col gap-3 border-t-2 border-cream-100 pt-3">
         <span className="text-sm font-bold uppercase tracking-wider text-cream-900 flex items-center gap-1.5">
           <Sliders className="w-4 h-4 text-pastelpink-500" />
@@ -295,6 +437,7 @@ export const CustomizationBar: React.FC<CustomizationBarProps> = ({
         </label>
       </div>
 
+      {/* Text Sticker Creator */}
       <div className="flex flex-col gap-3 border-t-2 border-cream-100 pt-3">
         <span className="text-sm font-bold uppercase tracking-wider text-cream-900 flex items-center gap-1.5">
           <Type className="w-4 h-4 text-pastelpink-500" />
@@ -355,6 +498,7 @@ export const CustomizationBar: React.FC<CustomizationBarProps> = ({
         </div>
       </div>
 
+      {/* Y2K Deco Stickers */}
       <div className="flex flex-col gap-2 border-t-2 border-cream-100 pt-3">
         <span className="text-sm font-bold uppercase tracking-wider text-cream-900 flex items-center gap-1.5">
           <Smile className="w-4 h-4 text-pastelpink-500" />
@@ -441,6 +585,7 @@ export const CustomizationBar: React.FC<CustomizationBarProps> = ({
         )}
       </div>
 
+      {/* Footer Controls: Audio, Date, Mirror */}
       <div className="flex flex-col gap-3 border-t-2 border-cream-100 pt-3 mt-1">
         <div className="flex items-center justify-between">
           <span className="text-sm font-bold uppercase tracking-wider text-cream-900 flex items-center gap-1.5">

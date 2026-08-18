@@ -1,33 +1,13 @@
-export interface StickerInstance {
-  id: string;
-  type: string;
-  text?: string;
-  x: number;
-  y: number;
-  scale: number;
-  rotation: number;
-}
+import type { StickerInstance, StitchOptions, LayoutType, DoodlePath } from '../types/photobooth';
+export type { StickerInstance, StitchOptions };
 
-export interface StitchOptions {
-  layout: 'vertical-4' | 'vertical-3' | 'vertical-2' | 'grid-6' | 'traditional-4';
-  backgroundColor: string;
-  filter: 'none' | 'grayscale' | 'sepia' | 'high-contrast' | 'vintage' | 'analog-film' | 'custom';
-  customR?: number;
-  customG?: number;
-  customB?: number;
-  customBrightness?: number;
-  showDate: boolean;
-  dateStr?: string;
-  isMirrored?: boolean;
-  downloadFormat: 'png' | 'jpg';
-  pattern?: 'none' | 'checkerboard' | 'stars' | 'cherries' | 'hologradient';
-  grainStrength?: number;
-  chromaticOffset?: number;
-  vhsOverlay?: boolean;
-  stickers?: StickerInstance[];
-}
+const imageCache = new Map<string, HTMLImageElement>();
 
-export function getPhotoCountForLayout(layout: StitchOptions['layout']): number {
+export const clearImageCache = () => {
+  imageCache.clear();
+};
+
+export function getPhotoCountForLayout(layout: LayoutType): number {
   switch (layout) {
     case 'vertical-2':
       return 2;
@@ -43,11 +23,21 @@ export function getPhotoCountForLayout(layout: StitchOptions['layout']): number 
 }
 
 const loadImage = (src: string): Promise<HTMLImageElement> => {
+  if (imageCache.has(src)) {
+    const cached = imageCache.get(src)!;
+    if (cached.complete && cached.naturalWidth > 0) {
+      return Promise.resolve(cached);
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.src = src;
-    img.onload = () => resolve(img);
+    img.onload = () => {
+      imageCache.set(src, img);
+      resolve(img);
+    };
     img.onerror = (e) => reject(e);
   });
 };
@@ -197,21 +187,19 @@ const drawCheckerboard = (ctx: CanvasRenderingContext2D, w: number, h: number, s
 
 const drawStarShape = (ctx: CanvasRenderingContext2D, cx: number, cy: number, innerRadius: number, outerRadius: number, spikes = 4) => {
   let rot = (Math.PI / 2) * 3;
-  let x = cx;
-  let y = cy;
   const step = Math.PI / spikes;
 
   ctx.beginPath();
   ctx.moveTo(cx, cy - outerRadius);
   for (let i = 0; i < spikes; i++) {
-    x = cx + Math.cos(rot) * outerRadius;
-    y = cy + Math.sin(rot) * outerRadius;
-    ctx.lineTo(x, y);
+    const ox = cx + Math.cos(rot) * outerRadius;
+    const oy = cy + Math.sin(rot) * outerRadius;
+    ctx.lineTo(ox, oy);
     rot += step;
 
-    x = cx + Math.cos(rot) * innerRadius;
-    y = cy + Math.sin(rot) * innerRadius;
-    ctx.lineTo(x, y);
+    const ix = cx + Math.cos(rot) * innerRadius;
+    const iy = cy + Math.sin(rot) * innerRadius;
+    ctx.lineTo(ix, iy);
     rot += step;
   }
   ctx.lineTo(cx, cy - outerRadius);
@@ -417,6 +405,46 @@ function applyFilmGrain(ctx: CanvasRenderingContext2D, w: number, h: number, str
     console.error('Film grain failed:', err);
   }
 }
+
+const drawDoodles = (
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  doodles?: DoodlePath[]
+) => {
+  if (!doodles || doodles.length === 0) return;
+
+  ctx.save();
+  for (const stroke of doodles) {
+    if (!stroke.points || stroke.points.length < 2) continue;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const strokeWidth = Math.max(3, (stroke.size / 300) * w);
+    ctx.lineWidth = strokeWidth;
+    ctx.strokeStyle = stroke.color;
+
+    if (stroke.glow) {
+      ctx.shadowColor = stroke.color;
+      ctx.shadowBlur = strokeWidth * 2;
+    }
+
+    const firstPt = stroke.points[0];
+    ctx.moveTo((firstPt.x / 100) * w, (firstPt.y / 100) * h);
+
+    for (let i = 1; i < stroke.points.length; i++) {
+      const pt = stroke.points[i];
+      ctx.lineTo((pt.x / 100) * w, (pt.y / 100) * h);
+    }
+
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+};
 
 export async function stitchPhotos(
   images: string[],
@@ -664,6 +692,10 @@ export async function stitchPhotos(
 
       ctx.restore();
     }
+  }
+
+  if (options.doodles && options.doodles.length > 0) {
+    drawDoodles(ctx, canvas.width, canvas.height, options.doodles);
   }
 
   if (options.vhsOverlay) {

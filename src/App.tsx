@@ -1,57 +1,40 @@
-import { useState, useEffect, useRef } from 'react';
-import { Camera, Sparkles, RefreshCw, Volume2, VolumeX } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Camera, Sparkles, RefreshCw, Volume2, VolumeX, Upload, FolderUp } from 'lucide-react';
 import { WebcamCapture } from './components/WebcamCapture';
 import { CustomizationBar } from './components/CustomizationBar';
 import { ExportPanel } from './components/ExportPanel';
-import { stitchPhotos, getPhotoCountForLayout } from './utils/canvasStitcher';
-import type { StitchOptions, StickerInstance } from './utils/canvasStitcher';
+import { DoodleCanvas } from './components/DoodleCanvas';
+import { PoseRetakeModal } from './components/PoseRetakeModal';
+import { MobileReceiverView } from './components/MobileReceiverView';
+import { stitchPhotos, getPhotoCountForLayout, clearImageCache } from './utils/canvasStitcher';
+import type { StitchOptions, StickerInstance, DoodlePath } from './types/photobooth';
+import { layoutsList } from './constants/photobooth';
 import { setSoundEnabled, playClick } from './utils/audioEngine';
 import { motion, AnimatePresence } from 'framer-motion';
-
-const layoutsList = [
-  {
-    id: 'vertical-4' as const,
-    name: 'Layout A',
-    poses: 4,
-    description: '4 Pose Strip',
-    style: 'vertical',
-  },
-  {
-    id: 'vertical-3' as const,
-    name: 'Layout B',
-    poses: 3,
-    description: '3 Pose Strip',
-    style: 'vertical',
-  },
-  {
-    id: 'vertical-2' as const,
-    name: 'Layout C',
-    poses: 2,
-    description: '2 Pose Strip',
-    style: 'vertical',
-  },
-  {
-    id: 'grid-6' as const,
-    name: 'Layout D',
-    poses: 6,
-    description: '6 Pose Grid',
-    style: 'grid',
-  },
-  {
-    id: 'traditional-4' as const,
-    name: 'Traditional',
-    poses: 4,
-    description: '4 Pose Vertical',
-    style: 'traditional',
-  },
-];
+import confetti from 'canvas-confetti';
 
 function App() {
   const [view, setView] = useState<'landing' | 'layout-select' | 'booth' | 'result'>('landing');
   const [photos, setPhotos] = useState<string[]>([]);
   const [stitchedPhoto, setStitchedPhoto] = useState<string>('');
   const [soundEnabled, setSoundEnabledState] = useState(true);
-  
+
+  // WebRTC Mobile Receiver Mode (initialized directly from URL search params)
+  const [receiveRoomId, setReceiveRoomId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('receive');
+  });
+
+  // Single-Pose Retake State
+  const [retakePoseIndex, setRetakePoseIndex] = useState<number | null>(null);
+
+  // Purikura Doodle Tool State
+  const [doodles, setDoodles] = useState<DoodlePath[]>([]);
+  const [doodleActive, setDoodleActive] = useState(false);
+  const [doodleColor, setDoodleColor] = useState('#FF2E93');
+  const [doodleSize, setDoodleSize] = useState(6);
+  const [doodleGlow, setDoodleGlow] = useState(true);
+
   const [options, setOptions] = useState<StitchOptions>({
     layout: 'vertical-4',
     backgroundColor: '#FFFFFF',
@@ -73,7 +56,9 @@ function App() {
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
 
   const previewContainerRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [containerWidth, setContainerWidth] = useState(300);
+  const [containerHeight, setContainerHeight] = useState(500);
 
   useEffect(() => {
     const element = previewContainerRef.current;
@@ -83,6 +68,9 @@ function App() {
       for (const entry of entries) {
         if (entry.contentRect.width > 0) {
           setContainerWidth(entry.contentRect.width);
+        }
+        if (entry.contentRect.height > 0) {
+          setContainerHeight(entry.contentRect.height);
         }
       }
     });
@@ -95,6 +83,7 @@ function App() {
     setSoundEnabled(soundEnabled);
   }, [soundEnabled]);
 
+  // Fast debounced canvas stitching pipeline with image caching
   useEffect(() => {
     const neededPhotos = getPhotoCountForLayout(options.layout);
     if (photos.length === neededPhotos) {
@@ -103,29 +92,96 @@ function App() {
           const result = await stitchPhotos(photos, {
             ...options,
             stickers,
+            doodles,
           });
           setStitchedPhoto(result);
         } catch (err) {
           console.error('Failed to stitch photos:', err);
         }
       };
-      
-      const timer = setTimeout(generateStrip, 50);
+
+      const timer = setTimeout(generateStrip, 40);
       return () => clearTimeout(timer);
     }
-  }, [photos, options, stickers]);
+  }, [photos, options, stickers, doodles]);
 
   const handleCaptureComplete = (capturedPhotos: string[]) => {
     setPhotos(capturedPhotos);
     setView('result');
+    confetti({
+      particleCount: 100,
+      spread: 80,
+      origin: { y: 0.6 },
+      colors: ['#FFD6DE', '#CFDEC0', '#5C0617', '#FF3D66', '#A3BE91', '#00FFCC'],
+    });
   };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    playClick();
+    const fileList = Array.from(files);
+    const readers = fileList.map((file) => {
+      return new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+    });
+
+    Promise.all(readers).then((uploadedPhotos) => {
+      if (uploadedPhotos.length > 0) {
+        let selectedLayout = options.layout;
+        if (uploadedPhotos.length === 2) selectedLayout = 'vertical-2';
+        else if (uploadedPhotos.length === 3) selectedLayout = 'vertical-3';
+        else if (uploadedPhotos.length === 6) selectedLayout = 'grid-6';
+        else selectedLayout = 'vertical-4';
+
+        setOptions((prev) => ({ ...prev, layout: selectedLayout }));
+        setPhotos(uploadedPhotos);
+        setView('result');
+        confetti({
+          particleCount: 100,
+          spread: 80,
+          origin: { y: 0.6 },
+          colors: ['#FFD6DE', '#CFDEC0', '#5C0617', '#FF3D66', '#A3BE91', '#00FFCC'],
+        });
+      }
+    });
+  };
+
+  const deleteSticker = useCallback((id: string) => {
+    playClick();
+    setStickers((prev) => prev.filter((s) => s.id !== id));
+    setSelectedStickerId((prev) => (prev === id ? null : prev));
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (view !== 'result') return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedStickerId) {
+        e.preventDefault();
+        deleteSticker(selectedStickerId);
+      } else if (e.key === 'Escape') {
+        setSelectedStickerId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [view, selectedStickerId, deleteSticker]);
 
   const resetSession = () => {
     playClick();
+    clearImageCache();
     setPhotos([]);
     setStitchedPhoto('');
     setStickers([]);
+    setDoodles([]);
     setSelectedStickerId(null);
+    setRetakePoseIndex(null);
     setView('landing');
   };
 
@@ -165,21 +221,28 @@ function App() {
     );
   };
 
-  const deleteSticker = (id: string) => {
-    playClick();
-    setStickers((prev) => prev.filter((s) => s.id !== id));
-    if (selectedStickerId === id) {
-      setSelectedStickerId(null);
-    }
-  };
-
   const clearStickers = () => {
     playClick();
     setStickers([]);
     setSelectedStickerId(null);
   };
 
+  const handleRetakeComplete = (newPhoto: string, index: number) => {
+    setPhotos((prev) => {
+      const updated = [...prev];
+      updated[index] = newPhoto;
+      return updated;
+    });
+    setRetakePoseIndex(null);
+    confetti({
+      particleCount: 60,
+      spread: 60,
+      origin: { y: 0.6 },
+    });
+  };
+
   const handleStickerMouseDown = (e: React.MouseEvent, id: string) => {
+    if (doodleActive) return;
     e.preventDefault();
     setSelectedStickerId(id);
     const container = previewContainerRef.current;
@@ -217,43 +280,81 @@ function App() {
     document.addEventListener('mouseup', handleMouseUp);
   };
 
+  // Mobile Touch Gestures (Single finger drag, 2-finger pinch-to-scale and rotate)
   const handleStickerTouchStart = (e: React.TouchEvent, id: string) => {
+    if (doodleActive) return;
     setSelectedStickerId(id);
     const container = previewContainerRef.current;
     if (!container) return;
 
     const rect = container.getBoundingClientRect();
-    const touch = e.touches[0];
-    const startX = touch.clientX;
-    const startY = touch.clientY;
-
     const sticker = stickers.find((s) => s.id === id);
     if (!sticker) return;
 
-    const startXPercent = sticker.x;
-    const startYPercent = sticker.y;
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const startX = touch.clientX;
+      const startY = touch.clientY;
+      const startXPercent = sticker.x;
+      const startYPercent = sticker.y;
 
-    const handleTouchMove = (moveEvent: TouchEvent) => {
-      const moveTouch = moveEvent.touches[0];
-      const deltaX = moveTouch.clientX - startX;
-      const deltaY = moveTouch.clientY - startY;
+      const handleTouchMove = (moveEvent: TouchEvent) => {
+        if (moveEvent.touches.length === 1) {
+          const moveTouch = moveEvent.touches[0];
+          const deltaX = moveTouch.clientX - startX;
+          const deltaY = moveTouch.clientY - startY;
 
-      const deltaXPercent = (deltaX / rect.width) * 100;
-      const deltaYPercent = (deltaY / rect.height) * 100;
+          const deltaXPercent = (deltaX / rect.width) * 100;
+          const deltaYPercent = (deltaY / rect.height) * 100;
 
-      updateSticker(id, {
-        x: Math.max(0, Math.min(100, startXPercent + deltaXPercent)),
-        y: Math.max(0, Math.min(100, startYPercent + deltaYPercent)),
-      });
-    };
+          updateSticker(id, {
+            x: Math.max(0, Math.min(100, startXPercent + deltaXPercent)),
+            y: Math.max(0, Math.min(100, startYPercent + deltaYPercent)),
+          });
+        }
+      };
 
-    const handleTouchEnd = () => {
-      document.removeEventListener('touchmove', handleTouchMove);
-      document.removeEventListener('touchend', handleTouchEnd);
-    };
+      const handleTouchEnd = () => {
+        document.removeEventListener('touchmove', handleTouchMove);
+        document.removeEventListener('touchend', handleTouchEnd);
+      };
 
-    document.addEventListener('touchmove', handleTouchMove, { passive: true });
-    document.addEventListener('touchend', handleTouchEnd);
+      document.addEventListener('touchmove', handleTouchMove, { passive: true });
+      document.addEventListener('touchend', handleTouchEnd);
+    } else if (e.touches.length === 2) {
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const initialDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const initialScale = sticker.scale;
+      const initialAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX) * (180 / Math.PI);
+      const initialRotation = sticker.rotation;
+
+      const handlePinchMove = (moveEvent: TouchEvent) => {
+        if (moveEvent.touches.length === 2) {
+          const pt1 = moveEvent.touches[0];
+          const pt2 = moveEvent.touches[1];
+          const currDist = Math.hypot(pt2.clientX - pt1.clientX, pt2.clientY - pt1.clientY);
+          const currAngle = Math.atan2(pt2.clientY - pt1.clientY, pt2.clientX - pt1.clientX) * (180 / Math.PI);
+
+          const scaleFactor = currDist / initialDist;
+          const newScale = Math.max(0.4, Math.min(3.0, initialScale * scaleFactor));
+          const newRotation = (initialRotation + (currAngle - initialAngle) + 360) % 360;
+
+          updateSticker(id, {
+            scale: parseFloat(newScale.toFixed(2)),
+            rotation: Math.round(newRotation),
+          });
+        }
+      };
+
+      const handlePinchEnd = () => {
+        document.removeEventListener('touchmove', handlePinchMove);
+        document.removeEventListener('touchend', handlePinchEnd);
+      };
+
+      document.addEventListener('touchmove', handlePinchMove, { passive: true });
+      document.addEventListener('touchend', handlePinchEnd);
+    }
   };
 
   const getEmojiForSticker = (type: string): string | null => {
@@ -291,8 +392,31 @@ function App() {
 
   const isTraditionalSelected = options.layout === 'traditional-4';
 
+  // If opened via QR Code (?receive=...), show the Mobile Receiver Screen
+  if (receiveRoomId) {
+    return (
+      <MobileReceiverView
+        roomId={receiveRoomId}
+        onGoToBooth={() => {
+          window.history.replaceState({}, '', window.location.pathname);
+          setReceiveRoomId(null);
+          setView('landing');
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen y2k-grid flex flex-col justify-between p-3 md:p-5 lg:p-6 relative">
+      {/* Hidden File Input for Image Upload Mode */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+        multiple
+        accept="image/*"
+        className="hidden"
+      />
 
       {(view === 'landing' || view === 'layout-select') && (
         <header className="w-full max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between border-3 border-cream-900 bg-white p-3 md:p-4 rounded-2xl shadow-neo mb-4 relative overflow-hidden">
@@ -347,7 +471,6 @@ function App() {
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-pastelpink-300 via-sage-300 to-maroon-800" />
             
             <div className="flex items-center gap-2 mt-0.5">
-              {/* Camera Icon in Rounded Pink Box */}
               <div className="w-7 h-7 md:w-8 md:h-8 rounded-lg bg-pastelpink-200 border-2 border-cream-900 flex items-center justify-center rotate-3 shadow-neo-sm shrink-0">
                 <Camera className="w-3.5 h-3.5 md:w-4 md:h-4 text-cream-900" />
               </div>
@@ -404,7 +527,7 @@ function App() {
               </h2>
 
               <p className="text-cream-600 font-medium text-xs md:text-sm max-w-sm mx-auto mb-4 md:mb-6">
-                Welcome to the retro digital photo booth. Select your layout, snap consecutive photos, customize retro filters, place draggable stickers, and download.
+                Welcome to the retro digital photo booth. Select your layout, snap consecutive photos or upload your own, draw neon doodles, place Y2K stickers, and beam straight to your phone!
               </p>
 
               <div className="grid grid-cols-2 gap-3 max-w-md mx-auto mb-6 md:mb-8 text-left font-mono text-[11px] md:text-xs font-bold text-cream-700">
@@ -418,24 +541,34 @@ function App() {
                 </div>
                 <div className="flex items-center gap-2 p-2 md:p-2.5 bg-cream-50 border-2 border-cream-200 rounded-xl">
                   <span className="w-5 h-5 rounded-lg bg-cream-200 flex items-center justify-center text-cream-900 text-xs">3</span>
-                  Frame Patterns & VHS HUDs
+                  Frame Patterns & Neon Pen
                 </div>
                 <div className="flex items-center gap-2 p-2 md:p-2.5 bg-cream-50 border-2 border-cream-200 rounded-xl">
                   <span className="w-5 h-5 rounded-lg bg-maroon-50 bg-opacity-50 flex items-center justify-center text-cream-900 text-xs">4</span>
-                  Custom Text & Stickers
+                  Beam to Mobile via QR
                 </div>
               </div>
 
-              <button
-                onClick={() => {
-                  playClick();
-                  setView('layout-select');
-                }}
-                className="inline-flex items-center gap-2 px-6 py-3 md:px-8 md:py-3.5 bg-pastelpink-200 text-cream-900 border-3 border-cream-900 rounded-2xl font-bold text-lg md:text-xl uppercase tracking-wide hover:bg-pastelpink-300 shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo-sm active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all group"
-              >
-                <Camera className="w-5.5 h-5.5 md:w-6 h-6 group-hover:rotate-12 transition-transform" />
-                Enter Photobooth
-              </button>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                <button
+                  onClick={() => {
+                    playClick();
+                    setView('layout-select');
+                  }}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-pastelpink-200 text-cream-900 border-3 border-cream-900 rounded-2xl font-bold text-base md:text-lg uppercase tracking-wide hover:bg-pastelpink-300 shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo-sm active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all group cursor-pointer"
+                >
+                  <Camera className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                  Enter Photobooth
+                </button>
+
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white text-cream-900 border-3 border-cream-900 rounded-2xl font-bold text-sm uppercase tracking-wide hover:bg-cream-100 shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer"
+                >
+                  <Upload className="w-4 h-4 text-cream-700" />
+                  Upload Photos
+                </button>
+              </div>
             </motion.div>
           )}
 
@@ -450,7 +583,7 @@ function App() {
                 Choose your layout
               </h2>
               <p className="text-cream-500 font-medium text-xs md:text-sm mb-4 md:mb-6">
-                Select a layout for your photo session. You can choose from different styles and poses.
+                Select a layout for your photo session. You can shoot live poses or upload files.
               </p>
 
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4 mb-4 md:mb-6">
@@ -515,22 +648,31 @@ function App() {
                 })}
               </div>
 
-              <div className="flex justify-center gap-4">
+              <div className="flex flex-wrap justify-center gap-3">
                 <button
                   onClick={() => {
                     playClick();
                     setView('landing');
                   }}
-                  className="px-5 py-2 md:px-6 md:py-2.5 border-2 border-cream-900 bg-white font-bold text-xs md:text-sm uppercase rounded-xl shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer"
+                  className="px-5 py-2.5 border-2 border-cream-900 bg-white font-bold text-xs md:text-sm uppercase rounded-xl shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer"
                 >
                   Back
                 </button>
+                
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-cream-100 hover:bg-cream-200 text-cream-900 border-2 border-cream-900 rounded-xl font-bold text-xs md:text-sm uppercase shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer"
+                >
+                  <FolderUp className="w-4 h-4" />
+                  Upload Photos
+                </button>
+
                 <button
                   onClick={() => {
                     playClick();
                     setView('booth');
                   }}
-                  className="inline-flex items-center gap-1.5 px-6 py-2 md:px-8 md:py-2.5 bg-pastelpink-200 text-cream-900 border-2 border-cream-900 rounded-xl font-bold text-base uppercase tracking-wide hover:bg-pastelpink-300 shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo-sm active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-6 py-2.5 bg-pastelpink-200 text-cream-900 border-2 border-cream-900 rounded-xl font-bold text-base uppercase tracking-wide hover:bg-pastelpink-300 shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo-sm active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all cursor-pointer"
                 >
                   Proceed to Booth
                 </button>
@@ -629,6 +771,19 @@ function App() {
                         className="max-h-[72vh] min-w-[220px] w-auto border-2 border-cream-900 rounded shadow-md pointer-events-none select-none block"
                       />
 
+                      {/* Purikura Neon Brush Overlay Canvas */}
+                      <DoodleCanvas
+                        active={doodleActive}
+                        doodles={doodles}
+                        onAddDoodle={(newDoodle) => setDoodles((prev) => [...prev, newDoodle])}
+                        currentColor={doodleColor}
+                        currentSize={doodleSize}
+                        glowEnabled={doodleGlow}
+                        width={containerWidth}
+                        height={containerHeight}
+                      />
+
+                      {/* Interactive Stickers Layer */}
                       {stickers.map((sticker) => {
                         const isSelected = sticker.id === selectedStickerId;
                         const emoji = getEmojiForSticker(sticker.type);
@@ -642,12 +797,14 @@ function App() {
                               left: `${sticker.x}%`,
                               top: `${sticker.y}%`,
                               transform: `translate(-50%, -50%) rotate(${sticker.rotation}deg) scale(${sticker.scale})`,
-                              cursor: 'grab',
+                              cursor: doodleActive ? 'default' : 'grab',
                               zIndex: isSelected ? 40 : 20,
+                              pointerEvents: doodleActive ? 'none' : 'auto',
                             }}
                             onMouseDown={(e) => handleStickerMouseDown(e, sticker.id)}
                             onTouchStart={(e) => handleStickerTouchStart(e, sticker.id)}
                             onClick={(e) => {
+                              if (doodleActive) return;
                               e.stopPropagation();
                               setSelectedStickerId(sticker.id);
                             }}
@@ -720,6 +877,28 @@ function App() {
                   onAddCustomTextSticker={addCustomTextSticker}
                   soundEnabled={soundEnabled}
                   onToggleSound={handleToggleSound}
+                  photos={photos}
+                  onRetakePose={(idx) => setRetakePoseIndex(idx)}
+                  doodleActive={doodleActive}
+                  onToggleDoodle={() => {
+                    playClick();
+                    setDoodleActive((prev) => !prev);
+                  }}
+                  doodleColor={doodleColor}
+                  onChangeDoodleColor={setDoodleColor}
+                  doodleSize={doodleSize}
+                  onChangeDoodleSize={setDoodleSize}
+                  doodleGlow={doodleGlow}
+                  onToggleDoodleGlow={() => setDoodleGlow((prev) => !prev)}
+                  hasDoodles={doodles.length > 0}
+                  onUndoDoodle={() => {
+                    playClick();
+                    setDoodles((prev) => prev.slice(0, -1));
+                  }}
+                  onClearDoodles={() => {
+                    playClick();
+                    setDoodles([]);
+                  }}
                 />
 
                 {stitchedPhoto && <ExportPanel options={options} onChange={setOptions} dataUrl={stitchedPhoto} />}
@@ -729,6 +908,16 @@ function App() {
 
         </AnimatePresence>
       </main>
+
+      {/* Single-Pose Retake Modal */}
+      {retakePoseIndex !== null && (
+        <PoseRetakeModal
+          poseIndex={retakePoseIndex}
+          totalPoses={photos.length}
+          onRetakeComplete={handleRetakeComplete}
+          onClose={() => setRetakePoseIndex(null)}
+        />
+      )}
 
       {view !== 'booth' && (
         <footer className="w-full max-w-5xl mx-auto border-t-2 border-cream-200 mt-4 pt-3 md:mt-6 md:pt-4 flex items-center justify-center font-mono text-[10px] text-cream-400 uppercase tracking-widest">
