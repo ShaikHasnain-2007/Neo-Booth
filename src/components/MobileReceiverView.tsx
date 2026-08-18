@@ -10,12 +10,16 @@ interface MobileReceiverViewProps {
 }
 
 export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, onGoToBooth }) => {
-  const [status, setStatus] = useState<'connecting' | 'connected' | 'received' | 'error'>('connecting');
+  const [status, setStatus] = useState<'connecting' | 'connected' | 'receiving' | 'received' | 'error'>('connecting');
+  const [receiveProgress, setReceiveProgress] = useState(0);
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [filename, setFilename] = useState<string>('neobooth-photo.png');
   const [errorMessage, setErrorMessage] = useState<string>('');
 
   const hasReceivedRef = useRef(false);
+  const chunksBufferRef = useRef<string[]>([]);
+  const totalChunksRef = useRef(0);
+  const receivedChunksCountRef = useRef(0);
 
   useEffect(() => {
     let peer: Peer | null = null;
@@ -24,6 +28,10 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
     const connectToHost = () => {
       setStatus('connecting');
       setErrorMessage('');
+      setReceiveProgress(0);
+      chunksBufferRef.current = [];
+      totalChunksRef.current = 0;
+      receivedChunksCountRef.current = 0;
 
       try {
         peer = new Peer();
@@ -35,17 +43,81 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
           conn.on('open', () => {
             if (isCancelled) return;
             setStatus('connected');
-            // Request the photo strip
-            conn.send({ type: 'REQUEST_PHOTO' });
+            // Request the photo strip transmission
+            conn.send({ type: 'READY_FOR_PHOTO' });
           });
 
           conn.on('data', (data: unknown) => {
             if (isCancelled) return;
-            const payload = data as { type: string; dataUrl?: string; filename?: string };
-            if (payload && payload.type === 'PHOTO_STRIP' && payload.dataUrl) {
+            const payload = data as {
+              type?: string;
+              dataUrl?: string;
+              filename?: string;
+              totalChunks?: number;
+              index?: number;
+              chunk?: string;
+            };
+
+            if (!payload) return;
+
+            // 1. Chunked Stream Header
+            if (payload.type === 'PHOTO_HEADER' && payload.totalChunks) {
+              setStatus('receiving');
+              totalChunksRef.current = payload.totalChunks;
+              chunksBufferRef.current = new Array(payload.totalChunks);
+              receivedChunksCountRef.current = 0;
+              if (payload.filename) setFilename(payload.filename);
+            }
+
+            // 2. Chunked Stream Piece
+            else if (payload.type === 'PHOTO_CHUNK' && payload.chunk !== undefined && payload.index !== undefined) {
+              chunksBufferRef.current[payload.index] = payload.chunk;
+              receivedChunksCountRef.current++;
+
+              const total = totalChunksRef.current || 1;
+              const percent = Math.min(99, Math.round((receivedChunksCountRef.current / total) * 100));
+              setReceiveProgress(percent);
+
+              if (receivedChunksCountRef.current >= totalChunksRef.current && totalChunksRef.current > 0) {
+                const fullImage = chunksBufferRef.current.join('');
+                hasReceivedRef.current = true;
+                setPhotoDataUrl(fullImage);
+                setReceiveProgress(100);
+                setStatus('received');
+
+                confetti({
+                  particleCount: 90,
+                  spread: 70,
+                  origin: { y: 0.6 },
+                  colors: ['#FFD6DE', '#CFDEC0', '#5C0617', '#FF3D66', '#A3BE91', '#00FFCC'],
+                });
+              }
+            }
+
+            // 3. Chunked Stream Complete
+            else if (payload.type === 'PHOTO_COMPLETE') {
+              if (chunksBufferRef.current.length > 0 && !hasReceivedRef.current) {
+                const fullImage = chunksBufferRef.current.join('');
+                hasReceivedRef.current = true;
+                setPhotoDataUrl(fullImage);
+                setReceiveProgress(100);
+                setStatus('received');
+
+                confetti({
+                  particleCount: 90,
+                  spread: 70,
+                  origin: { y: 0.6 },
+                  colors: ['#FFD6DE', '#CFDEC0', '#5C0617', '#FF3D66', '#A3BE91', '#00FFCC'],
+                });
+              }
+            }
+
+            // 4. Single packet fallback
+            else if (payload.type === 'PHOTO_STRIP' && payload.dataUrl) {
               hasReceivedRef.current = true;
               setPhotoDataUrl(payload.dataUrl);
               if (payload.filename) setFilename(payload.filename);
+              setReceiveProgress(100);
               setStatus('received');
 
               confetti({
@@ -61,7 +133,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
             console.error('Peer connection error:', err);
             if (!isCancelled) {
               setStatus('error');
-              setErrorMessage('Could not connect to the desktop photobooth. Please check if the QR code is still open.');
+              setErrorMessage('Could not connect to the photobooth. Please verify the QR Code is still open on desktop.');
             }
           });
         });
@@ -70,25 +142,25 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
           console.error('PeerJS error:', err);
           if (!isCancelled) {
             setStatus('error');
-            setErrorMessage('Network connection issue. Please ensure you are connected to the internet and try again.');
+            setErrorMessage('Network connection error. Please ensure you have an active internet connection.');
           }
         });
       } catch (err) {
         console.error('Initialization error:', err);
         setStatus('error');
-        setErrorMessage('Failed to initialize WebRTC transfer.');
+        setErrorMessage('Failed to initialize WebRTC streaming.');
       }
     };
 
     connectToHost();
 
-    // Timeout fallback after 15s if not received
+    // Timeout fallback after 18s if not received
     const timeout = setTimeout(() => {
       if (!hasReceivedRef.current && !isCancelled) {
         setStatus('error');
-        setErrorMessage('Connection timed out. Please ensure the QR Code window is still open on desktop.');
+        setErrorMessage('Connection timed out. Please ensure the QR Code window is still open on your laptop.');
       }
-    }, 15000);
+    }, 18000);
 
     return () => {
       isCancelled = true;
@@ -99,7 +171,47 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
     };
   }, [roomId]);
 
-  const handleShare = async () => {
+  // Mobile Save to Photos / Camera Roll handler
+  const handleSaveToCameraRoll = async () => {
+    if (!photoDataUrl) return;
+
+    try {
+      const res = await fetch(photoDataUrl);
+      const blob = await res.blob();
+      const file = new File([blob], filename, { type: blob.type });
+
+      // 1. Try native Web Share API (Triggers iOS/Android "Save to Camera Roll / Save Image")
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          title: 'My NEO.BOOTH Strip',
+          text: 'Captured on NEO.BOOTH // Y2K Retro Photobooth 📸✨',
+          files: [file],
+        });
+        return;
+      }
+    } catch (err) {
+      console.warn('Share sheet was dismissed or unsupported, attempting direct download:', err);
+    }
+
+    // 2. Direct Blob Object Download fallback
+    try {
+      const res = await fetch(photoDataUrl);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+    } catch (fallbackErr) {
+      console.error('Direct download fallback failed:', fallbackErr);
+      window.open(photoDataUrl, '_blank');
+    }
+  };
+
+  const handleShareStories = async () => {
     if (!photoDataUrl) return;
     try {
       const res = await fetch(photoDataUrl);
@@ -113,11 +225,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
           files: [file],
         });
       } else {
-        // Fallback download
-        const a = document.createElement('a');
-        a.href = photoDataUrl;
-        a.download = filename;
-        a.click();
+        await handleSaveToCameraRoll();
       }
     } catch (err) {
       console.error('Share failed:', err);
@@ -161,15 +269,15 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
               <RefreshCw className="w-8 h-8 animate-spin text-pastelpink-500" />
             </div>
             <div>
-              <h2 className="text-xl font-bold uppercase text-cream-900">Connecting to Photobooth</h2>
+              <h2 className="text-xl font-bold uppercase text-cream-900">Connecting to Laptop</h2>
               <p className="text-xs text-cream-500 mt-1 font-mono uppercase">
-                Pairing via encrypted WebRTC stream...
+                Pairing encrypted WebRTC stream...
               </p>
             </div>
           </motion.div>
         )}
 
-        {status === 'connected' && !photoDataUrl && (
+        {(status === 'connected' || status === 'receiving') && !photoDataUrl && (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -178,11 +286,19 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
             <div className="w-16 h-16 rounded-2xl bg-sage-100 border-2 border-cream-900 flex items-center justify-center shadow-neo-sm">
               <Sparkles className="w-8 h-8 text-sage-600 animate-pulse" />
             </div>
-            <div>
+            <div className="w-full">
               <h2 className="text-xl font-bold uppercase text-cream-900">Receiving Photo Strip</h2>
               <p className="text-xs text-cream-500 mt-1 font-mono uppercase">
-                Beaming high-res image directly to your device...
+                {receiveProgress > 0 ? `Streaming: ${receiveProgress}%` : 'Beaming high-res lossless image...'}
               </p>
+
+              {/* Live Streaming Progress Bar */}
+              <div className="w-full bg-cream-100 border-2 border-cream-900 rounded-full h-3.5 mt-4 overflow-hidden p-0.5">
+                <div
+                  style={{ width: `${Math.max(5, receiveProgress)}%` }}
+                  className="bg-pastelpink-400 h-full rounded-full transition-all duration-150"
+                />
+              </div>
             </div>
           </motion.div>
         )}
@@ -197,9 +313,9 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
               <AlertCircle className="w-8 h-8 text-red-500" />
             </div>
             <div>
-              <h2 className="text-lg font-bold uppercase text-cream-900">Transfer Unsuccessful</h2>
+              <h2 className="text-lg font-bold uppercase text-cream-900">Connection Failed</h2>
               <p className="text-xs text-cream-600 mt-2 max-w-xs mx-auto">
-                {errorMessage || 'Unable to receive photos. Please ensure the QR code modal is still open on desktop.'}
+                {errorMessage || 'Unable to beam photos. Please make sure the QR modal is still open on desktop.'}
               </p>
             </div>
             <button
@@ -222,29 +338,31 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
               Photo Strip Received!
             </div>
 
-            {/* Photo Strip Frame Preview */}
-            <div className="p-3 bg-[#eae8e1] border-3 border-cream-900 rounded-2xl shadow-neo max-w-[280px] w-full flex justify-center">
+            {/* Photo Strip Frame Preview with iOS touch-to-save support */}
+            <div className="p-3 bg-[#eae8e1] border-3 border-cream-900 rounded-2xl shadow-neo max-w-[280px] w-full flex flex-col items-center">
               <img
                 src={photoDataUrl}
                 alt="Received Photo Strip"
-                className="w-full h-auto max-h-[55vh] object-contain border border-cream-900 rounded shadow-sm"
+                className="w-full h-auto max-h-[50vh] object-contain border border-cream-900 rounded shadow-sm select-auto"
               />
+              <p className="text-[9px] font-mono text-cream-500 uppercase mt-2 text-center">
+                ✦ Tip: Press and hold image to save directly ✦
+              </p>
             </div>
 
             {/* Action Buttons */}
             <div className="w-full flex flex-col gap-2.5">
-              <a
-                href={photoDataUrl}
-                download={filename}
+              <button
+                onClick={handleSaveToCameraRoll}
                 className="flex items-center justify-center gap-2.5 w-full py-3.5 bg-cream-900 text-white border-2 border-cream-900 rounded-xl font-bold uppercase text-sm shadow-neo hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-neo-sm active:translate-x-[2px] active:translate-y-[2px] cursor-pointer text-center"
               >
                 <Download className="w-4 h-4" />
                 Save to Camera Roll / Download
-              </a>
+              </button>
 
               {typeof navigator !== 'undefined' && 'share' in navigator && (
                 <button
-                  onClick={handleShare}
+                  onClick={handleShareStories}
                   className="flex items-center justify-center gap-2 w-full py-3 bg-pastelpink-200 text-cream-900 border-2 border-cream-900 rounded-xl font-bold uppercase text-xs shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none cursor-pointer"
                 >
                   <Share2 className="w-4 h-4" />

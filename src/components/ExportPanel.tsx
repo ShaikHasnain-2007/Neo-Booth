@@ -34,7 +34,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
     setTransferStatus('idle');
   };
 
-  // Initialize WebRTC Peer Host and generate QR code for instantaneous direct mobile beaming
+  // Initialize WebRTC Peer Host with safe 16KB chunk streaming for mobile RTCDataChannel limits
   useEffect(() => {
     if (!showQRModal) return;
 
@@ -43,7 +43,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
     peerRef.current = peer;
 
     peer.on('open', (id) => {
-      // Build receiver link with query parameter (uses production URL when on localhost for seamless phone scanning)
+      // Build receiver link with query parameter (uses production URL when on localhost for phone compatibility)
       const baseOrigin =
         typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
           ? 'https://neo-booth.vercel.app'
@@ -65,33 +65,76 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
     peer.on('connection', (conn) => {
       setTransferStatus('sending');
 
-      const sendPhoto = () => {
-        conn.send({
-          type: 'PHOTO_STRIP',
-          dataUrl: dataUrl,
-          filename: filename,
-        });
-        setTransferStatus('success');
-        setConnectedCount((prev) => prev + 1);
+      // Safe 16KB chunk transmission to prevent WebRTC message size overflow on mobile
+      const streamPhotoChunks = () => {
+        const CHUNK_SIZE = 16384; // 16KB
+        const totalLength = dataUrl.length;
+        const totalChunks = Math.ceil(totalLength / CHUNK_SIZE);
 
-        confetti({
-          particleCount: 80,
-          spread: 70,
-          origin: { y: 0.6 },
-          colors: ['#FFD6DE', '#CFDEC0', '#5C0617', '#FF3D66', '#A3BE91', '#00FFCC'],
-        });
+        try {
+          // 1. Send Header
+          conn.send({
+            type: 'PHOTO_HEADER',
+            filename,
+            totalChunks,
+            totalSize: totalLength,
+          });
+
+          // 2. Stream Chunks with paced event loops
+          let currentChunk = 0;
+          const sendBatch = () => {
+            while (currentChunk < totalChunks) {
+              const start = currentChunk * CHUNK_SIZE;
+              const end = Math.min(start + CHUNK_SIZE, totalLength);
+              const chunkData = dataUrl.substring(start, end);
+
+              conn.send({
+                type: 'PHOTO_CHUNK',
+                index: currentChunk,
+                chunk: chunkData,
+              });
+
+              currentChunk++;
+
+              // Paced batching every 8 chunks (128KB) to prevent buffer drops on cellular/mobile
+              if (currentChunk % 8 === 0 && currentChunk < totalChunks) {
+                setTimeout(sendBatch, 15);
+                return;
+              }
+            }
+
+            // 3. Send completion
+            conn.send({
+              type: 'PHOTO_COMPLETE',
+            });
+
+            setTransferStatus('success');
+            setConnectedCount((prev) => prev + 1);
+
+            confetti({
+              particleCount: 80,
+              spread: 70,
+              origin: { y: 0.6 },
+              colors: ['#FFD6DE', '#CFDEC0', '#5C0617', '#FF3D66', '#A3BE91', '#00FFCC'],
+            });
+          };
+
+          setTimeout(sendBatch, 40);
+        } catch (err) {
+          console.error('Failed to stream photo chunks over WebRTC:', err);
+        }
       };
 
       if (conn.open) {
-        sendPhoto();
+        streamPhotoChunks();
       } else {
-        conn.on('open', sendPhoto);
+        conn.on('open', streamPhotoChunks);
       }
 
       conn.on('data', (data: unknown) => {
         const payload = data as { type?: string };
-        if (payload && payload.type === 'REQUEST_PHOTO') {
-          sendPhoto();
+        if (payload && (payload.type === 'REQUEST_PHOTO' || payload.type === 'READY_FOR_PHOTO')) {
+          streamPhotoChunks();
         }
       });
     });
@@ -322,7 +365,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
               {transferStatus === 'sending' && (
                 <div className="flex items-center justify-center gap-2 p-2 bg-sage-100 border-2 border-cream-900 rounded-xl text-[11px] font-mono font-bold text-sage-800 uppercase animate-pulse">
                   <Sparkles className="w-3.5 h-3.5 text-sage-600 animate-spin" />
-                  Phone connected! Sending photo strip...
+                  Phone connected! Streaming photo...
                 </div>
               )}
 
