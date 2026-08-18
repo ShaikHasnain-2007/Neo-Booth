@@ -27,7 +27,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
 
   const [downloading, setDownloading] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
-  const filename = 'neobooth-photostrip.png';
+  const filename = 'neobooth-photostrip.jpg';
 
   useEffect(() => {
     if (status === 'received') {
@@ -40,8 +40,8 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
     }
   }, [status]);
 
-  // Convert the displayed image into a clean, 100% uncorrupted local binary PNG Blob
-  const getPristinePngBlob = async (): Promise<Blob> => {
+  // Convert the displayed image into a clean, 100% uncorrupted high-res JPEG Blob
+  const getPristineJpgBlob = async (): Promise<Blob> => {
     if (!currentPhoto) throw new Error('No photo source');
 
     // 1. If image element is loaded in DOM, bake it directly onto canvas
@@ -52,9 +52,11 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
       canvas.height = img.naturalHeight;
       const ctx = canvas.getContext('2d');
       if (ctx) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0);
         const blob = await new Promise<Blob | null>((resolve) => {
-          canvas.toBlob((b) => resolve(b), 'image/png');
+          canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.95);
         });
         if (blob && blob.size > 0) return blob;
       }
@@ -63,7 +65,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
     // 2. Fetch directly with arrayBuffer fallback
     const res = await fetch(currentPhoto);
     const arrayBuffer = await res.arrayBuffer();
-    return new Blob([arrayBuffer], { type: 'image/png' });
+    return new Blob([arrayBuffer], { type: 'image/jpeg' });
   };
 
   // Mobile Save to Camera Roll / Photos handler
@@ -72,8 +74,8 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
     setDownloading(true);
 
     try {
-      const blob = await getPristinePngBlob();
-      const file = new File([blob], filename, { type: 'image/png' });
+      const blob = await getPristineJpgBlob();
+      const file = new File([blob], filename, { type: 'image/jpeg' });
 
       // 1. Try native Web Share API (Triggers native iOS/Android "Save Image / Save to Photos")
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -115,8 +117,8 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
     if (!currentPhoto || downloading) return;
     setDownloading(true);
     try {
-      const blob = await getPristinePngBlob();
-      const file = new File([blob], filename, { type: 'image/png' });
+      const blob = await getPristineJpgBlob();
+      const file = new File([blob], filename, { type: 'image/jpeg' });
 
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
