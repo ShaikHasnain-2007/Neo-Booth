@@ -22,7 +22,14 @@ function App() {
   // WebRTC Mobile Receiver Mode (initialized directly from URL search params)
   const [receiveRoomId, setReceiveRoomId] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
-    return new URLSearchParams(window.location.search).get('receive');
+    const params = new URLSearchParams(window.location.search);
+    return params.get('receive');
+  });
+
+  const [directFileUrl] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('file') || params.get('f') || null;
   });
 
   // Single-Pose Retake State
@@ -392,11 +399,12 @@ function App() {
 
   const isTraditionalSelected = options.layout === 'traditional-4';
 
-  // If opened via QR Code (?receive=...), show the Mobile Receiver Screen
-  if (receiveRoomId) {
+  // If opened via QR Code (?receive=... or ?file=...), show the Mobile Receiver Screen
+  if (receiveRoomId || directFileUrl) {
     return (
       <MobileReceiverView
-        roomId={receiveRoomId}
+        roomId={receiveRoomId || 'direct-file'}
+        directFileUrl={directFileUrl}
         onGoToBooth={() => {
           window.history.replaceState({}, '', window.location.pathname);
           setReceiveRoomId(null);

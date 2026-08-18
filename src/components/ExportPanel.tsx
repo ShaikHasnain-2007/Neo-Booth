@@ -11,6 +11,26 @@ interface ExportPanelProps {
   dataUrl: string;
 }
 
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelay',
+    credential: 'openrelay',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelay',
+    credential: 'openrelay',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelay',
+    credential: 'openrelay',
+  },
+];
+
 export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dataUrl }) => {
   const [copied, setCopied] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
@@ -34,23 +54,21 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
     setTransferStatus('idle');
   };
 
-  // Initialize WebRTC Peer Host with safe 16KB chunk streaming for mobile RTCDataChannel limits
+  // Initialize Dual-Engine QR Beaming: Fast Cloud File Relay + TURN-Backed WebRTC P2P
   useEffect(() => {
     if (!showQRModal) return;
 
+    let isMounted = true;
     const randomId = 'neo-' + Math.random().toString(36).substring(2, 9);
-    const peer = new Peer(randomId);
-    peerRef.current = peer;
 
-    peer.on('open', (id) => {
-      // Build receiver link with query parameter (uses production URL when on localhost for phone compatibility)
-      const baseOrigin =
-        typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-          ? 'https://neo-booth.vercel.app'
-          : window.location.origin;
+    const baseOrigin =
+      typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+        ? 'https://neo-booth.vercel.app'
+        : window.location.origin;
 
-      const shareUrl = `${baseOrigin}${window.location.pathname}?receive=${id}`;
-      QRCode.toDataURL(shareUrl, {
+    // Helper to generate the QR code image
+    const generateQr = (url: string) => {
+      QRCode.toDataURL(url, {
         width: 260,
         margin: 2,
         color: {
@@ -58,92 +76,136 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
           light: '#ffffff',
         },
       })
-        .then((url) => setQrCodeUrl(url))
+        .then((qr) => {
+          if (isMounted) setQrCodeUrl(qr);
+        })
         .catch((err) => console.error('QR generation failed:', err));
-    });
+    };
 
-    peer.on('connection', (conn) => {
-      setTransferStatus('sending');
+    // 1. Initial QR with WebRTC room ID
+    const initialShareUrl = `${baseOrigin}/?receive=${randomId}`;
+    generateQr(initialShareUrl);
 
-      // Safe 16KB chunk transmission to prevent WebRTC message size overflow on mobile
-      const streamPhotoChunks = () => {
-        const CHUNK_SIZE = 16384; // 16KB
-        const totalLength = dataUrl.length;
-        const totalChunks = Math.ceil(totalLength / CHUNK_SIZE);
+    // 2. Fast background cloud upload for 100% cellular 5G / CGNAT guarantee
+    const uploadToRelay = async () => {
+      try {
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        const topic = `neobooth_${randomId}`;
 
-        try {
-          // 1. Send Header
-          conn.send({
-            type: 'PHOTO_HEADER',
-            filename,
-            totalChunks,
-            totalSize: totalLength,
-          });
+        const uploadRes = await fetch(`https://ntfy.sh/${topic}`, {
+          method: 'PUT',
+          body: blob,
+          headers: {
+            Filename: filename,
+          },
+        });
 
-          // 2. Stream Chunks with paced event loops
-          let currentChunk = 0;
-          const sendBatch = () => {
-            while (currentChunk < totalChunks) {
-              const start = currentChunk * CHUNK_SIZE;
-              const end = Math.min(start + CHUNK_SIZE, totalLength);
-              const chunkData = dataUrl.substring(start, end);
-
-              conn.send({
-                type: 'PHOTO_CHUNK',
-                index: currentChunk,
-                chunk: chunkData,
-              });
-
-              currentChunk++;
-
-              // Paced batching every 8 chunks (128KB) to prevent buffer drops on cellular/mobile
-              if (currentChunk % 8 === 0 && currentChunk < totalChunks) {
-                setTimeout(sendBatch, 15);
-                return;
-              }
-            }
-
-            // 3. Send completion
-            conn.send({
-              type: 'PHOTO_COMPLETE',
-            });
-
-            setTransferStatus('success');
-            setConnectedCount((prev) => prev + 1);
-
-            confetti({
-              particleCount: 80,
-              spread: 70,
-              origin: { y: 0.6 },
-              colors: ['#FFD6DE', '#CFDEC0', '#5C0617', '#FF3D66', '#A3BE91', '#00FFCC'],
-            });
-          };
-
-          setTimeout(sendBatch, 40);
-        } catch (err) {
-          console.error('Failed to stream photo chunks over WebRTC:', err);
+        const uploadData = await uploadRes.json();
+        if (uploadData && uploadData.attachment && uploadData.attachment.url) {
+          const directFileUrl = uploadData.attachment.url;
+          // Upgrade QR code to include direct file URL for instantaneous, 0-timeout mobile loading
+          const enrichedShareUrl = `${baseOrigin}/?receive=${randomId}&file=${encodeURIComponent(directFileUrl)}`;
+          if (isMounted) {
+            generateQr(enrichedShareUrl);
+          }
         }
-      };
-
-      if (conn.open) {
-        streamPhotoChunks();
-      } else {
-        conn.on('open', streamPhotoChunks);
+      } catch (err) {
+        console.warn('Fast cloud upload fallback skipped:', err);
       }
+    };
 
-      conn.on('data', (data: unknown) => {
-        const payload = data as { type?: string };
-        if (payload && (payload.type === 'REQUEST_PHOTO' || payload.type === 'READY_FOR_PHOTO')) {
-          streamPhotoChunks();
-        }
+    void uploadToRelay();
+
+    // 3. Initialize WebRTC Peer Host with TURN Relays
+    try {
+      const peer = new Peer(randomId, {
+        config: { iceServers: ICE_SERVERS },
       });
-    });
+      peerRef.current = peer;
 
-    peer.on('error', (err) => {
-      console.warn('Peer error in host mode:', err);
-    });
+      peer.on('connection', (conn) => {
+        if (!isMounted) return;
+        setTransferStatus('sending');
+
+        const streamPhotoChunks = () => {
+          const CHUNK_SIZE = 16384; // 16KB per chunk
+          const totalLength = dataUrl.length;
+          const totalChunks = Math.ceil(totalLength / CHUNK_SIZE);
+
+          try {
+            conn.send({
+              type: 'PHOTO_HEADER',
+              filename,
+              totalChunks,
+              totalSize: totalLength,
+            });
+
+            let currentChunk = 0;
+            const sendBatch = () => {
+              while (currentChunk < totalChunks) {
+                const start = currentChunk * CHUNK_SIZE;
+                const end = Math.min(start + CHUNK_SIZE, totalLength);
+                const chunkData = dataUrl.substring(start, end);
+
+                conn.send({
+                  type: 'PHOTO_CHUNK',
+                  index: currentChunk,
+                  chunk: chunkData,
+                });
+
+                currentChunk++;
+
+                if (currentChunk % 8 === 0 && currentChunk < totalChunks) {
+                  setTimeout(sendBatch, 15);
+                  return;
+                }
+              }
+
+              conn.send({ type: 'PHOTO_COMPLETE' });
+
+              if (isMounted) {
+                setTransferStatus('success');
+                setConnectedCount((prev) => prev + 1);
+
+                confetti({
+                  particleCount: 80,
+                  spread: 70,
+                  origin: { y: 0.6 },
+                  colors: ['#FFD6DE', '#CFDEC0', '#5C0617', '#FF3D66', '#A3BE91', '#00FFCC'],
+                });
+              }
+            };
+
+            setTimeout(sendBatch, 40);
+          } catch (err) {
+            console.error('WebRTC chunk stream error:', err);
+          }
+        };
+
+        if (conn.open) {
+          streamPhotoChunks();
+        } else {
+          conn.on('open', streamPhotoChunks);
+        }
+
+        conn.on('data', (data: unknown) => {
+          const payload = data as { type?: string };
+          if (payload && (payload.type === 'REQUEST_PHOTO' || payload.type === 'READY_FOR_PHOTO')) {
+            streamPhotoChunks();
+          }
+        });
+      });
+
+      peer.on('error', (err) => {
+        console.warn('Peer error in host mode:', err);
+      });
+    } catch (err) {
+      console.warn('Peer initialization error:', err);
+    }
 
     return () => {
+      isMounted = false;
       if (peerRef.current) {
         peerRef.current.destroy();
         peerRef.current = null;
@@ -320,7 +382,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
         Download {options.downloadFormat.toUpperCase()} Strip
       </a>
 
-      {/* Real-time WebRTC QR Code Sharing Modal */}
+      {/* Real-time Dual Engine QR Code Sharing Modal */}
       {showQRModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="relative w-full max-w-sm bg-white border-3 border-cream-900 rounded-3xl p-6 shadow-neo-lg flex flex-col items-center text-center">
@@ -358,7 +420,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
               {transferStatus === 'waiting' && (
                 <div className="flex items-center justify-center gap-2 p-2 bg-cream-50 border-2 border-cream-200 rounded-xl text-[11px] font-mono font-bold text-cream-600 uppercase">
                   <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
-                  Waiting for phone to scan...
+                  Ready! Scan with phone camera...
                 </div>
               )}
 

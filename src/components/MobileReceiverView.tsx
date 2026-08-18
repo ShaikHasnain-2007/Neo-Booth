@@ -6,10 +6,31 @@ import { motion } from 'framer-motion';
 
 interface MobileReceiverViewProps {
   roomId: string;
+  directFileUrl?: string | null;
   onGoToBooth: () => void;
 }
 
-export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, onGoToBooth }) => {
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelay',
+    credential: 'openrelay',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelay',
+    credential: 'openrelay',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelay',
+    credential: 'openrelay',
+  },
+];
+
+export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, directFileUrl, onGoToBooth }) => {
   const [status, setStatus] = useState<'connecting' | 'connected' | 'receiving' | 'received' | 'error'>('connecting');
   const [receiveProgress, setReceiveProgress] = useState(0);
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
@@ -21,20 +42,66 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
   const totalChunksRef = useRef(0);
   const receivedChunksCountRef = useRef(0);
 
+  // 1. Instant Direct Cloud URL Loader (Works 100% on 5G / CGNAT / Wi-Fi)
   useEffect(() => {
+    if (!directFileUrl || hasReceivedRef.current) return;
+
+    let isCancelled = false;
+    const fetchDirectPhoto = async () => {
+      try {
+        setStatus('receiving');
+        setReceiveProgress(40);
+        const res = await fetch(directFileUrl);
+        if (!res.ok) throw new Error('Cloud file fetch error');
+
+        const blob = await res.blob();
+        if (isCancelled) return;
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (isCancelled || !reader.result) return;
+          hasReceivedRef.current = true;
+          setPhotoDataUrl(reader.result as string);
+          setReceiveProgress(100);
+          setStatus('received');
+
+          confetti({
+            particleCount: 90,
+            spread: 70,
+            origin: { y: 0.6 },
+            colors: ['#FFD6DE', '#CFDEC0', '#5C0617', '#FF3D66', '#A3BE91', '#00FFCC'],
+          });
+        };
+        reader.readAsDataURL(blob);
+      } catch (err) {
+        console.warn('Direct cloud URL fetch failed, relying on WebRTC stream:', err);
+      }
+    };
+
+    void fetchDirectPhoto();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [directFileUrl]);
+
+  // 2. TURN-Backed WebRTC Stream Connection
+  useEffect(() => {
+    if (!roomId || roomId === 'direct-file') return;
+
     let peer: Peer | null = null;
     let isCancelled = false;
 
     const connectToHost = () => {
-      setStatus('connecting');
-      setErrorMessage('');
-      setReceiveProgress(0);
-      chunksBufferRef.current = [];
-      totalChunksRef.current = 0;
-      receivedChunksCountRef.current = 0;
+      if (!hasReceivedRef.current) {
+        setStatus('connecting');
+        setErrorMessage('');
+      }
 
       try {
-        peer = new Peer();
+        peer = new Peer({
+          config: { iceServers: ICE_SERVERS },
+        });
 
         peer.on('open', () => {
           if (isCancelled || !peer) return;
@@ -42,7 +109,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
 
           conn.on('open', () => {
             if (isCancelled) return;
-            setStatus('connected');
+            if (!hasReceivedRef.current) setStatus('connected');
             // Request the photo strip transmission
             conn.send({ type: 'READY_FOR_PHOTO' });
           });
@@ -62,7 +129,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
 
             // 1. Chunked Stream Header
             if (payload.type === 'PHOTO_HEADER' && payload.totalChunks) {
-              setStatus('receiving');
+              if (!hasReceivedRef.current) setStatus('receiving');
               totalChunksRef.current = payload.totalChunks;
               chunksBufferRef.current = new Array(payload.totalChunks);
               receivedChunksCountRef.current = 0;
@@ -130,8 +197,8 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
           });
 
           conn.on('error', (err) => {
-            console.error('Peer connection error:', err);
-            if (!isCancelled) {
+            console.warn('Peer connection warning:', err);
+            if (!isCancelled && !hasReceivedRef.current) {
               setStatus('error');
               setErrorMessage('Could not connect to the photobooth. Please verify the QR Code is still open on desktop.');
             }
@@ -139,28 +206,30 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
         });
 
         peer.on('error', (err) => {
-          console.error('PeerJS error:', err);
-          if (!isCancelled) {
+          console.warn('PeerJS warning:', err);
+          if (!isCancelled && !hasReceivedRef.current) {
             setStatus('error');
             setErrorMessage('Network connection error. Please ensure you have an active internet connection.');
           }
         });
       } catch (err) {
-        console.error('Initialization error:', err);
-        setStatus('error');
-        setErrorMessage('Failed to initialize WebRTC streaming.');
+        console.warn('Initialization error:', err);
+        if (!hasReceivedRef.current) {
+          setStatus('error');
+          setErrorMessage('Failed to initialize WebRTC streaming.');
+        }
       }
     };
 
     connectToHost();
 
-    // Timeout fallback after 18s if not received
+    // Timeout fallback after 20s if not received via cloud or webrtc
     const timeout = setTimeout(() => {
       if (!hasReceivedRef.current && !isCancelled) {
         setStatus('error');
         setErrorMessage('Connection timed out. Please ensure the QR Code window is still open on your laptop.');
       }
-    }, 18000);
+    }, 20000);
 
     return () => {
       isCancelled = true;
@@ -271,7 +340,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
             <div>
               <h2 className="text-xl font-bold uppercase text-cream-900">Connecting to Laptop</h2>
               <p className="text-xs text-cream-500 mt-1 font-mono uppercase">
-                Pairing encrypted WebRTC stream...
+                Pairing encrypted stream...
               </p>
             </div>
           </motion.div>
@@ -289,13 +358,13 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
             <div className="w-full">
               <h2 className="text-xl font-bold uppercase text-cream-900">Receiving Photo Strip</h2>
               <p className="text-xs text-cream-500 mt-1 font-mono uppercase">
-                {receiveProgress > 0 ? `Streaming: ${receiveProgress}%` : 'Beaming high-res lossless image...'}
+                {receiveProgress > 0 ? `Loading: ${receiveProgress}%` : 'Beaming high-res lossless image...'}
               </p>
 
               {/* Live Streaming Progress Bar */}
               <div className="w-full bg-cream-100 border-2 border-cream-900 rounded-full h-3.5 mt-4 overflow-hidden p-0.5">
                 <div
-                  style={{ width: `${Math.max(5, receiveProgress)}%` }}
+                  style={{ width: `${Math.max(8, receiveProgress)}%` }}
                   className="bg-pastelpink-400 h-full rounded-full transition-all duration-150"
                 />
               </div>
@@ -303,7 +372,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ roomId, 
           </motion.div>
         )}
 
-        {status === 'error' && (
+        {status === 'error' && !photoDataUrl && (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
