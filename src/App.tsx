@@ -19,17 +19,11 @@ function App() {
   const [stitchedPhoto, setStitchedPhoto] = useState<string>('');
   const [soundEnabled, setSoundEnabledState] = useState(true);
 
-  // WebRTC Mobile Receiver Mode (initialized directly from URL search params)
-  const [receiveRoomId, setReceiveRoomId] = useState<string | null>(() => {
+  // Mobile Photo Delivery Mode (initialized directly from URL search params)
+  const [photoUrl, setPhotoUrl] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     const params = new URLSearchParams(window.location.search);
-    return params.get('receive');
-  });
-
-  const [directFileUrl] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null;
-    const params = new URLSearchParams(window.location.search);
-    return params.get('file') || params.get('f') || null;
+    return params.get('photo') || params.get('file') || params.get('f') || null;
   });
 
   // Single-Pose Retake State
@@ -399,15 +393,14 @@ function App() {
 
   const isTraditionalSelected = options.layout === 'traditional-4';
 
-  // If opened via QR Code (?receive=... or ?file=...), show the Mobile Receiver Screen
-  if (receiveRoomId || directFileUrl) {
+  // If opened via Photo QR Code (?photo=...), show the Mobile Receiver Screen
+  if (photoUrl) {
     return (
       <MobileReceiverView
-        roomId={receiveRoomId || 'direct-file'}
-        directFileUrl={directFileUrl}
+        photoUrl={photoUrl}
         onGoToBooth={() => {
           window.history.replaceState({}, '', window.location.pathname);
-          setReceiveRoomId(null);
+          setPhotoUrl(null);
           setView('landing');
         }}
       />
