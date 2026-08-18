@@ -11,6 +11,9 @@ interface ExportPanelProps {
   dataUrl: string;
 }
 
+// In-memory cache for instant zero-latency QR display
+const qrCache = new Map<string, { qrCodeUrl: string; shareUrl: string }>();
+
 export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dataUrl }) => {
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -21,46 +24,39 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
 
   const isPng = options.downloadFormat === 'png';
   const filename = `neobooth-${new Date().toISOString().slice(0, 10)}.${options.downloadFormat}`;
-  const uploadControllerRef = useRef<boolean>(false);
+  const isMountedRef = useRef(true);
 
-  const handleOpenQRModal = () => {
-    setShowQRModal(true);
-    setUploadStatus('uploading');
-    setQrCodeUrl('');
-    setShareablePhotoUrl('');
-  };
-
-  const handleCloseQRModal = () => {
-    setShowQRModal(false);
-    setUploadStatus('idle');
-  };
-
-  // Upload the unique photo strip and generate its dedicated, unique QR code
+  // Background Pre-Upload: As soon as the photo strip renders, upload in background so the QR is ready immediately
   useEffect(() => {
-    if (!showQRModal || !dataUrl) return;
+    isMountedRef.current = true;
+    if (!dataUrl) return;
 
-    uploadControllerRef.current = true;
     let isCancelled = false;
 
-    const generateDedicatedPhotoQR = async () => {
-      setUploadStatus('uploading');
+    const timer = setTimeout(() => {
+      // Check if already in cache
+      if (qrCache.has(dataUrl)) {
+        const cached = qrCache.get(dataUrl)!;
+        if (isMountedRef.current && !isCancelled) {
+          setQrCodeUrl(cached.qrCodeUrl);
+          setShareablePhotoUrl(cached.shareUrl);
+          setUploadStatus('ready');
+        }
+        return;
+      }
 
-      const baseOrigin =
-        typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-          ? 'https://neo-booth.vercel.app'
-          : window.location.origin;
+      const preUploadAndGenerateQR = async () => {
+        const baseOrigin =
+          typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+            ? 'https://neo-booth.vercel.app'
+            : window.location.origin;
 
-      try {
-        // Upload this specific photo strip to get a dedicated permanent/temporary URL
-        const uploadedUrl = await uploadPhotoStripToCloud(dataUrl, filename);
+        try {
+          const uploadedUrl = await uploadPhotoStripToCloud(dataUrl, filename);
+          if (isCancelled || !uploadedUrl) return;
 
-        if (isCancelled || !uploadControllerRef.current) return;
-
-        if (uploadedUrl) {
           const directShareLink = `${baseOrigin}/?photo=${encodeURIComponent(uploadedUrl)}`;
-          setShareablePhotoUrl(directShareLink);
-
-          const qrDataUrl = await QRCode.toDataURL(directShareLink, {
+          const qr = await QRCode.toDataURL(directShareLink, {
             width: 280,
             margin: 2,
             color: {
@@ -69,30 +65,43 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
             },
           });
 
-          if (!isCancelled) {
-            setQrCodeUrl(qrDataUrl);
+          qrCache.set(dataUrl, { qrCodeUrl: qr, shareUrl: directShareLink });
+
+          if (isMountedRef.current && !isCancelled) {
+            setQrCodeUrl(qr);
+            setShareablePhotoUrl(directShareLink);
             setUploadStatus('ready');
           }
-        } else {
-          if (!isCancelled) {
-            setUploadStatus('error');
-          }
+        } catch (err) {
+          console.warn('Background pre-upload skipped:', err);
         }
-      } catch (err) {
-        console.error('QR generation error:', err);
-        if (!isCancelled) {
-          setUploadStatus('error');
-        }
-      }
-    };
+      };
 
-    void generateDedicatedPhotoQR();
+      void preUploadAndGenerateQR();
+    }, 100);
 
     return () => {
       isCancelled = true;
-      uploadControllerRef.current = false;
+      clearTimeout(timer);
     };
-  }, [showQRModal, dataUrl, filename]);
+  }, [dataUrl, filename]);
+
+  const handleOpenQRModal = () => {
+    setShowQRModal(true);
+    // If already pre-cached in background, display immediately with 0ms delay!
+    if (qrCache.has(dataUrl)) {
+      const cached = qrCache.get(dataUrl)!;
+      setQrCodeUrl(cached.qrCodeUrl);
+      setShareablePhotoUrl(cached.shareUrl);
+      setUploadStatus('ready');
+    } else {
+      setUploadStatus('uploading');
+    }
+  };
+
+  const handleCloseQRModal = () => {
+    setShowQRModal(false);
+  };
 
   const triggerConfetti = () => {
     confetti({
@@ -299,7 +308,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
             </p>
 
             <div className="p-3 bg-cream-50 border-3 border-cream-900 rounded-2xl shadow-neo-sm mb-4 relative min-h-[220px] w-full flex items-center justify-center">
-              {uploadStatus === 'uploading' && (
+              {uploadStatus === 'uploading' && !qrCodeUrl && (
                 <div className="w-52 h-52 flex flex-col items-center justify-center gap-3 text-xs font-mono text-cream-600 uppercase">
                   <RefreshCw className="w-8 h-8 animate-spin text-pastelpink-500" />
                   <span className="font-bold">Generating Photo QR...</span>
@@ -307,13 +316,13 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
                 </div>
               )}
 
-              {uploadStatus === 'ready' && qrCodeUrl && (
+              {qrCodeUrl && (
                 <div className="flex flex-col items-center">
                   <img src={qrCodeUrl} alt="Photobooth QR Code" className="w-52 h-52 rounded-xl" />
                 </div>
               )}
 
-              {uploadStatus === 'error' && (
+              {uploadStatus === 'error' && !qrCodeUrl && (
                 <div className="w-52 h-52 flex flex-col items-center justify-center gap-2 text-xs font-mono text-red-500 uppercase">
                   <span>Failed to generate QR</span>
                   <button
@@ -328,11 +337,11 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
 
             {/* Live Status Indicator */}
             <div className="w-full mb-4">
-              {uploadStatus === 'ready' && (
+              {qrCodeUrl && (
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-center gap-2 p-2 bg-emerald-100 border-2 border-emerald-900 rounded-xl text-[11px] font-mono font-bold text-emerald-900 uppercase">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    Unique QR Ready! Scan with phone
+                    Ultra-Crisp QR Ready! Scan with phone
                   </div>
 
                   {shareablePhotoUrl && (
@@ -347,7 +356,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
                 </div>
               )}
 
-              {uploadStatus === 'uploading' && (
+              {uploadStatus === 'uploading' && !qrCodeUrl && (
                 <div className="flex items-center justify-center gap-2 p-2 bg-pastelpink-50 border-2 border-cream-200 rounded-xl text-[11px] font-mono font-bold text-cream-600 uppercase">
                   <Sparkles className="w-3.5 h-3.5 text-pastelpink-500 animate-spin" />
                   Preparing private link...

@@ -2,8 +2,8 @@
  * Reliable binary converter and high-speed multi-provider CORS cloud uploader for photobooth QR code sharing.
  */
 
-// Convert dataURL to High-Quality (94%) JPEG for 10x faster mobile upload and instant gallery compatibility
-export async function convertToHighQualityJpg(dataUrl: string, quality = 0.94): Promise<string> {
+// Convert dataURL to Ultra-High-Quality (98%) JPEG for crisp high-resolution photo strips and fast mobile delivery
+export async function convertToHighQualityJpg(dataUrl: string, quality = 0.98): Promise<string> {
   if (dataUrl.startsWith('data:image/jpeg')) {
     return dataUrl;
   }
@@ -54,8 +54,8 @@ export function dataUrlToBlob(dataUrl: string): Blob {
 export async function uploadPhotoStripToCloud(dataUrl: string, filename: string): Promise<string | null> {
   let blob: Blob;
   try {
-    // Convert to high-quality JPEG for 10x smaller file size, instant upload speed, and universal gallery support
-    const optimizedJpgDataUrl = await convertToHighQualityJpg(dataUrl, 0.94);
+    // Convert to 98% Ultra-High-Quality JPEG for maximum visual fidelity and fast upload
+    const optimizedJpgDataUrl = await convertToHighQualityJpg(dataUrl, 0.98);
     blob = dataUrlToBlob(optimizedJpgDataUrl);
   } catch (err) {
     console.warn('Optimization fallback:', err);
