@@ -74,19 +74,8 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
             setUploadStatus('ready');
           }
         } else {
-          // Fallback: WebRTC or direct link if offline
-          const fallbackShareLink = `${baseOrigin}/?photo=local`;
-          const qrDataUrl = await QRCode.toDataURL(fallbackShareLink, {
-            width: 280,
-            margin: 2,
-            color: {
-              dark: '#1b1b19',
-              light: '#ffffff',
-            },
-          });
           if (!isCancelled) {
-            setQrCodeUrl(qrDataUrl);
-            setUploadStatus('ready');
+            setUploadStatus('error');
           }
         }
       } catch (err) {
@@ -309,7 +298,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
               Scan this QR code with your phone camera to instantly download your photo strip to your camera roll!
             </p>
 
-            <div className="p-3 bg-cream-50 border-3 border-cream-900 rounded-2xl shadow-neo-sm mb-4 relative min-h-[220px] flex items-center justify-center">
+            <div className="p-3 bg-cream-50 border-3 border-cream-900 rounded-2xl shadow-neo-sm mb-4 relative min-h-[220px] w-full flex items-center justify-center">
               {uploadStatus === 'uploading' && (
                 <div className="w-52 h-52 flex flex-col items-center justify-center gap-3 text-xs font-mono text-cream-600 uppercase">
                   <RefreshCw className="w-8 h-8 animate-spin text-pastelpink-500" />
