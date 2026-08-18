@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Download, Share2, Camera, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { motion } from 'framer-motion';
@@ -25,8 +25,9 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
     return queryPhoto && queryPhoto !== 'local' ? 'received' : 'error';
   });
 
-  const [filename] = useState<string>('neobooth-photo.png');
-  const [errorMessage] = useState<string>('No photo found for this QR link. Please scan a fresh QR code from your laptop.');
+  const [downloading, setDownloading] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const filename = 'neobooth-photostrip.png';
 
   useEffect(() => {
     if (status === 'received') {
@@ -39,14 +40,40 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
     }
   }, [status]);
 
+  // Convert the displayed image into a clean, 100% uncorrupted local binary PNG Blob
+  const getPristinePngBlob = async (): Promise<Blob> => {
+    if (!currentPhoto) throw new Error('No photo source');
+
+    // 1. If image element is loaded in DOM, bake it directly onto canvas
+    if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0) {
+      const img = imgRef.current;
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+        const blob = await new Promise<Blob | null>((resolve) => {
+          canvas.toBlob((b) => resolve(b), 'image/png');
+        });
+        if (blob && blob.size > 0) return blob;
+      }
+    }
+
+    // 2. Fetch directly with arrayBuffer fallback
+    const res = await fetch(currentPhoto);
+    const arrayBuffer = await res.arrayBuffer();
+    return new Blob([arrayBuffer], { type: 'image/png' });
+  };
+
   // Mobile Save to Camera Roll / Photos handler
   const handleSaveToCameraRoll = async () => {
-    if (!currentPhoto) return;
+    if (!currentPhoto || downloading) return;
+    setDownloading(true);
 
     try {
-      const res = await fetch(currentPhoto);
-      const blob = await res.blob();
-      const file = new File([blob], filename, { type: blob.type || 'image/png' });
+      const blob = await getPristinePngBlob();
+      const file = new File([blob], filename, { type: 'image/png' });
 
       // 1. Try native Web Share API (Triggers native iOS/Android "Save Image / Save to Photos")
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -55,16 +82,11 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
           text: 'Captured on NEO.BOOTH // Y2K Retro Photobooth 📸✨',
           files: [file],
         });
+        setDownloading(false);
         return;
       }
-    } catch (err) {
-      console.warn('Share sheet dismissed or unsupported, falling back to direct download:', err);
-    }
 
-    // 2. Direct Blob Object Download fallback
-    try {
-      const res = await fetch(currentPhoto);
-      const blob = await res.blob();
+      // 2. Direct Blob Download Fallback
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
@@ -72,19 +94,29 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
-    } catch (fallbackErr) {
-      console.error('Direct download fallback failed:', fallbackErr);
-      window.open(currentPhoto, '_blank');
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
+    } catch (err) {
+      console.warn('Native save fallback, trying direct link:', err);
+      if (currentPhoto) {
+        const a = document.createElement('a');
+        a.href = currentPhoto;
+        a.download = filename;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+    } finally {
+      setDownloading(false);
     }
   };
 
   const handleShareStories = async () => {
-    if (!currentPhoto) return;
+    if (!currentPhoto || downloading) return;
+    setDownloading(true);
     try {
-      const res = await fetch(currentPhoto);
-      const blob = await res.blob();
-      const file = new File([blob], filename, { type: blob.type || 'image/png' });
+      const blob = await getPristinePngBlob();
+      const file = new File([blob], filename, { type: 'image/png' });
 
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
@@ -97,6 +129,8 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
       }
     } catch (err) {
       console.error('Share failed:', err);
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -157,7 +191,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
             <div>
               <h2 className="text-lg font-bold uppercase text-cream-900">Photo Not Found</h2>
               <p className="text-xs text-cream-600 mt-2 max-w-xs mx-auto">
-                {errorMessage || 'Please generate a new QR Code on your laptop.'}
+                No photo found for this QR link. Please scan a fresh QR code from your laptop.
               </p>
             </div>
             <button
@@ -183,9 +217,14 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
             {/* Photo Strip Frame Preview with iOS touch-to-save support */}
             <div className="p-3 bg-[#eae8e1] border-3 border-cream-900 rounded-2xl shadow-neo max-w-[280px] w-full flex flex-col items-center">
               <img
+                ref={imgRef}
+                crossOrigin="anonymous"
                 src={currentPhoto}
                 alt="Your Photo Strip"
                 className="w-full h-auto max-h-[52vh] object-contain border border-cream-900 rounded shadow-sm select-auto"
+                onError={() => {
+                  console.warn('Image load issue, displaying directly');
+                }}
               />
               <p className="text-[9px] font-mono text-cream-500 uppercase mt-2 text-center">
                 ✦ Tip: Press and hold image to save to Photos ✦
@@ -196,16 +235,27 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
             <div className="w-full flex flex-col gap-2.5">
               <button
                 onClick={handleSaveToCameraRoll}
-                className="flex items-center justify-center gap-2.5 w-full py-3.5 bg-cream-900 text-white border-2 border-cream-900 rounded-xl font-bold uppercase text-sm shadow-neo hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-neo-sm active:translate-x-[2px] active:translate-y-[2px] cursor-pointer text-center"
+                disabled={downloading}
+                className="flex items-center justify-center gap-2.5 w-full py-3.5 bg-cream-900 text-white border-2 border-cream-900 rounded-xl font-bold uppercase text-sm shadow-neo hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-neo-sm active:translate-x-[2px] active:translate-y-[2px] cursor-pointer text-center disabled:opacity-70"
               >
-                <Download className="w-4 h-4" />
-                Save to Camera Roll / Download
+                {downloading ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    Save to Camera Roll / Download
+                  </>
+                )}
               </button>
 
               {typeof navigator !== 'undefined' && 'share' in navigator && (
                 <button
                   onClick={handleShareStories}
-                  className="flex items-center justify-center gap-2 w-full py-3 bg-pastelpink-200 text-cream-900 border-2 border-cream-900 rounded-xl font-bold uppercase text-xs shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none cursor-pointer"
+                  disabled={downloading}
+                  className="flex items-center justify-center gap-2 w-full py-3 bg-pastelpink-200 text-cream-900 border-2 border-cream-900 rounded-xl font-bold uppercase text-xs shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none cursor-pointer disabled:opacity-70"
                 >
                   <Share2 className="w-4 h-4" />
                   Share to Instagram / Stories
