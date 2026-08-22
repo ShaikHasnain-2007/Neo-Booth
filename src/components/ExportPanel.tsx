@@ -1,26 +1,57 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Download, Image, Check, Copy, Share2, QrCode, X, Sparkles, CheckCircle2, RefreshCw, ExternalLink } from 'lucide-react';
+import { 
+  Download, 
+  Image, 
+  Check, 
+  Copy, 
+  Share2, 
+  QrCode, 
+  X, 
+  Sparkles, 
+  CheckCircle2, 
+  RefreshCw, 
+  ExternalLink,
+  Film,
+  Printer,
+  Scissors
+} from 'lucide-react';
 import confetti from 'canvas-confetti';
 import QRCode from 'qrcode';
 import { uploadPhotoStripToCloud } from '../utils/photoShareService';
+import { stitchDualPrintSheet, generateAnimatedGif } from '../utils/canvasStitcher';
 import type { StitchOptions } from '../types/photobooth';
 
 interface ExportPanelProps {
   options: StitchOptions;
   onChange: (options: StitchOptions) => void;
   dataUrl: string;
+  burstFrames?: string[][];
+  onOpenThermalModal?: () => void;
 }
 
 // In-memory cache for instant zero-latency QR display
 const qrCache = new Map<string, { qrCodeUrl: string; shareUrl: string }>();
 
-export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dataUrl }) => {
+export const ExportPanel: React.FC<ExportPanelProps> = ({ 
+  options, 
+  onChange, 
+  dataUrl, 
+  burstFrames,
+  onOpenThermalModal 
+}) => {
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const [shareablePhotoUrl, setShareablePhotoUrl] = useState<string>('');
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'ready' | 'error'>('idle');
+
+  // GIF generation loading state
+  const [isGeneratingGif, setIsGeneratingGif] = useState(false);
+  const [gifCopied, setGifCopied] = useState(false);
+
+  // 4x6 print sheet loading state
+  const [isGenerating4x6, setIsGenerating4x6] = useState(false);
 
   const isPng = options.downloadFormat === 'png';
   const filename = `neobooth-${new Date().toISOString().slice(0, 10)}.${options.downloadFormat}`;
@@ -88,7 +119,6 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
 
   const handleOpenQRModal = () => {
     setShowQRModal(true);
-    // If already pre-cached in background, display immediately with 0ms delay!
     if (qrCache.has(dataUrl)) {
       const cached = qrCache.get(dataUrl)!;
       setQrCodeUrl(cached.qrCodeUrl);
@@ -121,6 +151,52 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
 
   const handleDownload = () => {
     triggerConfetti();
+  };
+
+  // 🎞️ Animated GIF Download Handler
+  const handleDownloadGif = async () => {
+    if (!burstFrames || burstFrames.length === 0 || isGeneratingGif) return;
+    setIsGeneratingGif(true);
+
+    try {
+      const gifBlob = await generateAnimatedGif(burstFrames, options);
+      const url = URL.createObjectURL(gifBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `neobooth-animated-${new Date().toISOString().slice(0, 10)}.gif`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setGifCopied(true);
+      triggerConfetti();
+      setTimeout(() => setGifCopied(false), 3000);
+    } catch (err) {
+      console.error('GIF generation failed:', err);
+    } finally {
+      setIsGeneratingGif(false);
+    }
+  };
+
+  // 🖨️ 4x6" Duplicate Printable Sheet Handler
+  const handleDownload4x6Sheet = async () => {
+    if (isGenerating4x6 || !dataUrl) return;
+    setIsGenerating4x6(true);
+
+    try {
+      const dualSheetUrl = await stitchDualPrintSheet(dataUrl);
+      const a = document.createElement('a');
+      a.href = dualSheetUrl;
+      a.download = `neobooth-4x6-dual-strip-${new Date().toISOString().slice(0, 10)}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      triggerConfetti();
+    } catch (err) {
+      console.error('4x6 sheet generation failed:', err);
+    } finally {
+      setIsGenerating4x6(false);
+    }
   };
 
   const handleCopyShareLink = async () => {
@@ -275,6 +351,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
         )}
       </div>
 
+      {/* Main Download Button */}
       <a
         href={dataUrl}
         download={filename}
@@ -284,6 +361,52 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ options, onChange, dat
         <Download className="w-5 h-5" />
         Download {options.downloadFormat.toUpperCase()} Strip
       </a>
+
+      {/* 🎞️ Animated GIF and 🖨️ 4x6 Dual-Strip Advanced Exporters */}
+      <div className="grid grid-cols-2 gap-2 pt-1 border-t-2 border-cream-100">
+        <button
+          onClick={handleDownloadGif}
+          disabled={isGeneratingGif}
+          className="flex items-center justify-center gap-2 p-3 bg-pastelpink-100 hover:bg-pastelpink-200 text-cream-900 border-2 border-cream-900 rounded-xl font-bold uppercase text-xs shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer disabled:opacity-60 text-left"
+        >
+          {isGeneratingGif ? (
+            <RefreshCw className="w-4 h-4 animate-spin text-pastelpink-600" />
+          ) : gifCopied ? (
+            <Check className="w-4 h-4 text-emerald-600" />
+          ) : (
+            <Film className="w-4 h-4 text-pastelpink-600" />
+          )}
+          <span className="truncate">
+            {isGeneratingGif ? 'Compiling GIF...' : gifCopied ? 'GIF Saved!' : 'Animated GIF'}
+          </span>
+        </button>
+
+        <button
+          onClick={handleDownload4x6Sheet}
+          disabled={isGenerating4x6}
+          title="Download 4x6 inch standard photo paper sheet with 2 cut-strips"
+          className="flex items-center justify-center gap-2 p-3 bg-amber-50 hover:bg-amber-100 text-cream-900 border-2 border-cream-900 rounded-xl font-bold uppercase text-xs shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer disabled:opacity-60 text-left"
+        >
+          {isGenerating4x6 ? (
+            <RefreshCw className="w-4 h-4 animate-spin text-amber-600" />
+          ) : (
+            <Scissors className="w-4 h-4 text-amber-700" />
+          )}
+          <span className="truncate">
+            {isGenerating4x6 ? 'Rendering Sheet...' : '4x6" Dual Print'}
+          </span>
+        </button>
+      </div>
+
+      {onOpenThermalModal && (
+        <button
+          onClick={onOpenThermalModal}
+          className="w-full py-2.5 bg-zinc-100 hover:bg-zinc-200 text-cream-900 border-2 border-cream-900 rounded-xl font-bold text-xs uppercase flex items-center justify-center gap-2 shadow-neo-sm hover:translate-y-[1px] cursor-pointer"
+        >
+          <Printer className="w-4 h-4 text-cream-900" />
+          Thermal Pocket Printer Mode
+        </button>
+      )}
 
       {/* Dedicated Per-Photo Mobile QR Code Sharing Modal */}
       {showQRModal && (

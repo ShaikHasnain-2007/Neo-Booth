@@ -25,6 +25,8 @@ export type LayoutType = 'vertical-4' | 'vertical-3' | 'vertical-2' | 'grid-6' |
 export type FilterType = 'none' | 'grayscale' | 'sepia' | 'high-contrast' | 'vintage' | 'analog-film' | 'custom';
 export type PatternType = 'none' | 'checkerboard' | 'stars' | 'cherries' | 'hologradient';
 export type ARFilter = 'aviators' | 'cyber-shades' | 'beauty-makeup' | 'heart-blush' | 'macbook-hearts' | 'noise' | 'tulip';
+export type CaptionFont = 'matrix' | 'bubble' | 'gothic' | 'handwritten' | 'pixel';
+export type DitherType = 'none' | 'floyd-steinberg';
 
 export interface DoodlePoint {
   x: number;
@@ -57,6 +59,23 @@ export interface StitchOptions {
   vhsOverlay?: boolean;
   stickers?: StickerInstance[];
   doodles?: DoodlePath[];
+  // Captions & Custom Typography
+  captionText?: string;
+  captionFont?: CaptionFont;
+  captionColor?: string;
+  // Print & Thermal Printer options
+  isDualStripPrint?: boolean;
+  ditherMode?: DitherType;
+  // AI Virtual Backdrop
+  virtualBackdrop?: string;
+}
+
+export interface VirtualBackdrop {
+  id: string;
+  name: string;
+  preview: string;
+  type: 'css' | 'image' | 'gradient';
+  bgValue: string;
 }
 
 export interface HeartParticle {

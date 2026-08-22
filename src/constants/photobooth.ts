@@ -1,9 +1,14 @@
+import type { VirtualBackdrop, CaptionFont } from '../types/photobooth';
+
 export const colorSwatches = [
   { name: 'White', value: '#FFFFFF', class: 'bg-white border-cream-200' },
   { name: 'Pitch Black', value: '#18181B', class: 'bg-zinc-900 border-zinc-700' },
   { name: 'Maroon Red', value: '#5C0617', class: 'bg-[#5C0617] border-[#3D020D]' },
   { name: 'Pastel Pink', value: '#FFD6DE', class: 'bg-[#FFD6DE] border-[#FFA3B5]' },
   { name: 'Sage Green', value: '#CFDEC0', class: 'bg-[#CFDEC0] border-[#A3BE91]' },
+  { name: 'Cyber Cyan', value: '#00F0FF', class: 'bg-[#00F0FF] border-[#00B4D8]' },
+  { name: 'Butter Yellow', value: '#FEF08A', class: 'bg-[#FEF08A] border-[#FACC15]' },
+  { name: 'Lavender', value: '#E9D5FF', class: 'bg-[#E9D5FF] border-[#C084FC]' },
 ];
 
 export const filterOptions = [
@@ -35,6 +40,10 @@ export const stickersList = [
   { id: 'flower', emoji: '🌸', label: 'Flower', type: 'emoji' },
   { id: 'lightning', emoji: '⚡', label: 'Volt', type: 'emoji' },
   { id: 'teddy', emoji: '🧸', label: 'Teddy', type: 'emoji' },
+  { id: 'ribbon', emoji: '🎀', label: 'Ribbon', type: 'emoji' },
+  { id: 'fire', emoji: '🔥', label: 'Fire', type: 'emoji' },
+  { id: 'kiss', emoji: '💋', label: 'Kiss', type: 'emoji' },
+  { id: 'crown', emoji: '👑', label: 'Crown', type: 'emoji' },
 ];
 
 export const badgeStylesList = [
@@ -91,3 +100,62 @@ export const doodleBrushes = [
   { id: 'pitch-black', name: 'Ink Black', color: '#000000', glow: false },
 ];
 
+export const virtualBackdropsList: VirtualBackdrop[] = [
+  {
+    id: 'none',
+    name: 'Real Background',
+    preview: '🏠',
+    type: 'css',
+    bgValue: 'transparent',
+  },
+  {
+    id: 'cyberpunk-tokyo',
+    name: 'Cyber Tokyo',
+    preview: '🌆',
+    type: 'gradient',
+    bgValue: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)',
+  },
+  {
+    id: 'y2k-bliss',
+    name: 'Windows Bliss',
+    preview: '🪟',
+    type: 'gradient',
+    bgValue: 'linear-gradient(180deg, #3a88e9 0%, #70b4ff 50%, #44aa33 50%, #2e8b1e 100%)',
+  },
+  {
+    id: 'retro-laser',
+    name: '90s Laser Grid',
+    preview: '⚡',
+    type: 'gradient',
+    bgValue: 'linear-gradient(135deg, #1f005c 0%, #5b0060 25%, #870160 50%, #ac255e 75%, #ca485c 100%)',
+  },
+  {
+    id: 'sakura-blossom',
+    name: 'Sakura Pastel',
+    preview: '🌸',
+    type: 'gradient',
+    bgValue: 'linear-gradient(135deg, #ff9a9e 0%, #fecfef 99%, #fecfef 100%)',
+  },
+  {
+    id: 'vaporwave-sunset',
+    name: 'Vaporwave',
+    preview: '🌴',
+    type: 'gradient',
+    bgValue: 'linear-gradient(180deg, #ff71ce 0%, #01cdfe 50%, #05ffa1 100%)',
+  },
+  {
+    id: 'minimal-studio',
+    name: 'Photo Studio',
+    preview: '📸',
+    type: 'gradient',
+    bgValue: 'radial-gradient(circle at center, #ffffff 0%, #d4d4d8 100%)',
+  },
+];
+
+export const captionFontsList: { id: CaptionFont; name: string; fontClass: string; example: string }[] = [
+  { id: 'matrix', name: 'Digital Matrix', fontClass: 'font-mono tracking-widest uppercase font-black', example: '2026.08.22' },
+  { id: 'bubble', name: 'Y2K Bubble', fontClass: 'font-sans font-black tracking-tight uppercase', example: 'BESTIES ✨' },
+  { id: 'gothic', name: 'Tokyo Gothic', fontClass: 'font-serif uppercase font-bold tracking-widest', example: 'TOKYO NIGHTS' },
+  { id: 'handwritten', name: 'Sharpie Pen', fontClass: 'font-mono italic font-bold tracking-wider', example: 'sweet memories' },
+  { id: 'pixel', name: '8-Bit Pixel', fontClass: 'font-mono uppercase font-extrabold tracking-widest', example: 'NEO BOOTH' },
+];
