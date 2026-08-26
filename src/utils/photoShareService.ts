@@ -4,7 +4,7 @@
 
 // Convert dataURL to Ultra-High-Quality (98%) JPEG for crisp high-resolution photo strips and fast mobile delivery
 export async function convertToHighQualityJpg(dataUrl: string, quality = 0.98): Promise<string> {
-  if (dataUrl.startsWith('data:image/jpeg')) {
+  if (dataUrl.startsWith('data:image/jpeg') || dataUrl.startsWith('data:image/gif')) {
     return dataUrl;
   }
   return new Promise((resolve) => {
@@ -35,7 +35,7 @@ export function dataUrlToBlob(dataUrl: string): Blob {
   try {
     const parts = dataUrl.split(',');
     const mimeMatch = parts[0].match(/:(.*?);/);
-    const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    const mime = mimeMatch ? mimeMatch[1] : (dataUrl.startsWith('data:image/gif') ? 'image/gif' : 'image/jpeg');
     const byteString = atob(parts[1]);
     const arrayBuffer = new ArrayBuffer(byteString.length);
     const uint8Array = new Uint8Array(arrayBuffer);
@@ -53,10 +53,15 @@ export function dataUrlToBlob(dataUrl: string): Blob {
 
 export async function uploadPhotoStripToCloud(dataUrl: string, filename: string): Promise<string | null> {
   let blob: Blob;
+  const isGif = dataUrl.startsWith('data:image/gif') || filename.endsWith('.gif');
+
   try {
-    // Convert to 98% Ultra-High-Quality JPEG for maximum visual fidelity and fast upload
-    const optimizedJpgDataUrl = await convertToHighQualityJpg(dataUrl, 0.98);
-    blob = dataUrlToBlob(optimizedJpgDataUrl);
+    if (isGif) {
+      blob = dataUrlToBlob(dataUrl);
+    } else {
+      const optimizedJpgDataUrl = await convertToHighQualityJpg(dataUrl, 0.98);
+      blob = dataUrlToBlob(optimizedJpgDataUrl);
+    }
   } catch (err) {
     console.warn('Optimization fallback:', err);
     try {
@@ -66,9 +71,11 @@ export async function uploadPhotoStripToCloud(dataUrl: string, filename: string)
     }
   }
 
-  const cleanFilename = filename.replace(/\.[^/.]+$/, '') + '.jpg';
+  const cleanFilename = isGif 
+    ? (filename.endsWith('.gif') ? filename : filename.replace(/\.[^/.]+$/, '') + '.gif')
+    : filename.replace(/\.[^/.]+$/, '') + '.jpg';
 
-  // Provider 1: ntfy.sh (Ultra-fast, CORS: *, returns direct image/jpeg with 100% byte integrity)
+  // Provider 1: ntfy.sh (Ultra-fast, CORS: *, returns direct image with 100% byte integrity)
   try {
     const randomTopic = 'neobooth_photo_' + Math.random().toString(36).substring(2, 9);
 
@@ -77,7 +84,7 @@ export async function uploadPhotoStripToCloud(dataUrl: string, filename: string)
       body: blob,
       headers: {
         'Filename': cleanFilename,
-        'Title': 'NEO.BOOTH Photo Strip',
+        'Title': isGif ? 'NEO.BOOTH Animated GIF' : 'NEO.BOOTH Photo Strip',
       },
     });
 

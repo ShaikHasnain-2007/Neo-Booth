@@ -1,6 +1,4 @@
 import type { StickerInstance, StitchOptions, LayoutType, DoodlePath } from '../types/photobooth';
-import { applyFloydSteinbergDithering } from './dithering';
-import { createAnimatedGifFromCanvases } from './gifEncoder';
 export type { StickerInstance, StitchOptions };
 
 const imageCache = new Map<string, HTMLImageElement>();
@@ -83,10 +81,6 @@ const getEmojiForSticker = (type: string): string | null => {
     case 'flower': return '🌸';
     case 'lightning': return '⚡';
     case 'teddy': return '🧸';
-    case 'ribbon': return '🎀';
-    case 'fire': return '🔥';
-    case 'kiss': return '💋';
-    case 'crown': return '👑';
     default: return null;
   }
 };
@@ -159,14 +153,68 @@ function applyCustomPixelAdjustments(
   }
 }
 
-function drawRoundedRect(
+function isColorDark(hex: string): boolean {
+  let cleanHex = hex.replace('#', '');
+  if (cleanHex.length === 3) {
+    cleanHex = cleanHex.split('').map(c => c + c).join('');
+  }
+  if (cleanHex.length !== 6) return false;
+  
+  const r = parseInt(cleanHex.substring(0, 2), 16);
+  const g = parseInt(cleanHex.substring(2, 4), 16);
+  const b = parseInt(cleanHex.substring(4, 6), 16);
+  
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance < 0.5;
+}
+
+const drawCheckerboard = (ctx: CanvasRenderingContext2D, w: number, h: number, swatchColor: string) => {
+  const size = 60;
+  ctx.save();
+  ctx.fillStyle = swatchColor;
+  ctx.fillRect(0, 0, w, h);
+  
+  ctx.fillStyle = isColorDark(swatchColor) ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)';
+  for (let y = 0; y < h; y += size) {
+    for (let x = 0; x < w; x += size) {
+      if ((Math.floor(x / size) + Math.floor(y / size)) % 2 === 0) {
+        ctx.fillRect(x, y, size, size);
+      }
+    }
+  }
+  ctx.restore();
+};
+
+const drawStarShape = (ctx: CanvasRenderingContext2D, cx: number, cy: number, innerRadius: number, outerRadius: number, spikes = 4) => {
+  let rot = (Math.PI / 2) * 3;
+  const step = Math.PI / spikes;
+
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - outerRadius);
+  for (let i = 0; i < spikes; i++) {
+    const ox = cx + Math.cos(rot) * outerRadius;
+    const oy = cy + Math.sin(rot) * outerRadius;
+    ctx.lineTo(ox, oy);
+    rot += step;
+
+    const ix = cx + Math.cos(rot) * innerRadius;
+    const iy = cy + Math.sin(rot) * innerRadius;
+    ctx.lineTo(ix, iy);
+    rot += step;
+  }
+  ctx.lineTo(cx, cy - outerRadius);
+  ctx.closePath();
+  ctx.fill();
+};
+
+const drawRoundedRect = (
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   width: number,
   height: number,
   radius: number
-) {
+) => {
   ctx.beginPath();
   ctx.moveTo(x + radius, y);
   ctx.lineTo(x + width - radius, y);
@@ -178,95 +226,136 @@ function drawRoundedRect(
   ctx.lineTo(x, y + radius);
   ctx.quadraticCurveTo(x, y, x + radius, y);
   ctx.closePath();
-}
+};
 
-function drawCheckerboard(ctx: CanvasRenderingContext2D, w: number, h: number, baseColor: string) {
-  ctx.fillStyle = baseColor;
+const drawStars = (ctx: CanvasRenderingContext2D, w: number, h: number, swatchColor: string) => {
+  ctx.save();
+  ctx.fillStyle = swatchColor;
   ctx.fillRect(0, 0, w, h);
   
-  const size = 32;
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
-  for (let y = 0; y < h; y += size) {
-    for (let x = 0; x < w; x += size) {
-      if ((Math.floor(x / size) + Math.floor(y / size)) % 2 === 0) {
-        ctx.fillRect(x, y, size, size);
-      }
-    }
-  }
-}
+  const starColor = isColorDark(swatchColor) ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.08)';
+  ctx.fillStyle = starColor;
+  
+  const colSpacing = 120;
+  const cols = Math.max(2, Math.ceil((w - 40) / colSpacing) + 1);
+  const rowSpacing = 120;
+  const rows = Math.max(2, Math.ceil((h - 40) / rowSpacing) + 1);
 
-function drawStarsPattern(ctx: CanvasRenderingContext2D, w: number, h: number, baseColor: string) {
-  ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 0, w, h);
-
-  const starCount = Math.floor((w * h) / 12000);
-  ctx.save();
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-  ctx.font = '22px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-
-  for (let i = 0; i < starCount; i++) {
-    const x = ((i * 137.5) % w);
-    const y = ((i * 263.3) % h);
-    ctx.fillText('✦', x, y);
-  }
-  ctx.restore();
-}
-
-function drawCherriesPattern(ctx: CanvasRenderingContext2D, w: number, h: number, baseColor: string) {
-  ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 0, w, h);
-
-  const cherrySpacing = 110;
-  ctx.save();
-  ctx.font = '24px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.globalAlpha = 0.35;
-
-  for (let y = 30; y < h; y += cherrySpacing) {
-    for (let x = 30; x < w; x += cherrySpacing) {
-      ctx.fillText('🍒', x, y);
+  for (let row = 0; row < rows; row++) {
+    const y = rows > 1 ? 25 + (row / (rows - 1)) * (h - 50) : h / 2;
+    for (let col = 0; col < cols; col++) {
+      const x = cols > 1 ? 25 + (col / (cols - 1)) * (w - 50) : w / 2;
+      const shiftX = ((col * row * 13) % 20) - 10;
+      const shiftY = ((col * row * 19) % 20) - 10;
+      drawStarShape(ctx, x + shiftX, y + shiftY, 6, 15, 4);
     }
   }
   ctx.restore();
-}
+};
 
-function drawHoloGradient(ctx: CanvasRenderingContext2D, w: number, h: number) {
+const drawSingleCherry = (ctx: CanvasRenderingContext2D, cx: number, cy: number) => {
+  ctx.save();
+  
+  ctx.beginPath();
+  ctx.strokeStyle = '#2D6A4F';
+  ctx.lineWidth = 3.5;
+  ctx.lineCap = 'round';
+  ctx.moveTo(cx, cy);
+  ctx.bezierCurveTo(cx - 10, cy + 15, cx - 15, cy + 25, cx - 15, cy + 30);
+  ctx.moveTo(cx, cy);
+  ctx.bezierCurveTo(cx + 10, cy + 10, cx + 15, cy + 25, cx + 15, cy + 30);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.fillStyle = '#52B788';
+  ctx.ellipse(cx - 5, cy + 8, 8, 4, -Math.PI / 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#2D6A4F';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = '#D90429';
+  ctx.beginPath();
+  ctx.arc(cx - 15, cy + 34, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + 15, cy + 34, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(cx - 12, cy + 30, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + 18, cy + 30, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+};
+
+const drawCherries = (ctx: CanvasRenderingContext2D, w: number, h: number, swatchColor: string) => {
+  ctx.save();
+  ctx.fillStyle = swatchColor;
+  ctx.fillRect(0, 0, w, h);
+  
+  const colSpacing = 160;
+  const cols = Math.max(2, Math.ceil((w - 40) / colSpacing) + 1);
+  const rowSpacing = 160;
+  const rows = Math.max(2, Math.ceil((h - 40) / rowSpacing) + 1);
+
+  for (let row = 0; row < rows; row++) {
+    const y = rows > 1 ? 25 + (row / (rows - 1)) * (h - 50) : h / 2;
+    for (let col = 0; col < cols; col++) {
+      const x = cols > 1 ? 25 + (col / (cols - 1)) * (w - 50) : w / 2;
+      const shiftX = ((col * row * 17) % 30) - 15;
+      const shiftY = ((col * row * 23) % 30) - 15;
+      drawSingleCherry(ctx, x + shiftX, y + shiftY);
+    }
+  }
+  ctx.restore();
+};
+
+const drawHoloGradient = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
+  ctx.save();
   const grad = ctx.createLinearGradient(0, 0, w, h);
   grad.addColorStop(0, '#FFD6DE');
-  grad.addColorStop(0.25, '#E0C3FC');
-  grad.addColorStop(0.5, '#8EC5FC');
-  grad.addColorStop(0.75, '#CFDEC0');
-  grad.addColorStop(1, '#FFE5B4');
+  grad.addColorStop(0.3, '#E6E6FA');
+  grad.addColorStop(0.6, '#D4F0FC');
+  grad.addColorStop(1, '#CFDEC0');
+  
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
-}
-
-function isColorDark(hexColor: string): boolean {
-  if (hexColor.startsWith('#')) {
-    const c = hexColor.substring(1);
-    const rgb = parseInt(c, 16);
-    const r = (rgb >> 16) & 0xff;
-    const g = (rgb >> 8) & 0xff;
-    const b = (rgb >> 0) & 0xff;
-    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    return luma < 120;
-  }
-  return false;
-}
+  ctx.restore();
+};
 
 const drawVHSOverlay = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
   ctx.save();
-  ctx.fillStyle = '#00FF66';
-  ctx.font = 'bold 36px "Share Tech Mono", monospace';
-  ctx.shadowColor = '#00FF66';
-  ctx.shadowBlur = 10;
-  ctx.fillText('PLAY ►', 50, 80);
-  ctx.fillText('SP 0:00:24', 50, 130);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 24px "Share Tech Mono", "Courier New", monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
 
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+  ctx.fillStyle = '#FF3B30';
+  ctx.beginPath();
+  ctx.arc(60, 56, 8, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText('REC', 78, 44);
+  ctx.fillText('0:02:14', 60, 78);
+
+  ctx.textAlign = 'right';
+  ctx.fillText('▲ PLAY', w - 60, 44);
+  ctx.fillText('SP', w - 60, 78);
+
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(w - 200, 48, 40, 20);
+  ctx.fillRect(w - 160, 54, 4, 8);
+  ctx.fillRect(w - 196, 52, 10, 12);
+  ctx.fillRect(w - 184, 52, 10, 12);
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
   for (let y = 0; y < h; y += 4) {
     ctx.fillRect(0, y, w, 1.5);
   }
@@ -321,30 +410,33 @@ const drawDoodles = (
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
-  doodles: DoodlePath[]
+  doodles?: DoodlePath[]
 ) => {
-  ctx.save();
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
+  if (!doodles || doodles.length === 0) return;
 
-  for (const doodle of doodles) {
-    if (doodle.points.length < 2) continue;
+  ctx.save();
+  for (const stroke of doodles) {
+    if (!stroke.points || stroke.points.length < 2) continue;
 
     ctx.save();
-    ctx.strokeStyle = doodle.color;
-    ctx.lineWidth = Math.max(3, (doodle.size / 100) * Math.min(w, h));
+    ctx.beginPath();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
 
-    if (doodle.glow) {
-      ctx.shadowColor = doodle.color;
-      ctx.shadowBlur = Math.max(8, doodle.size * 2);
+    const strokeWidth = Math.max(3, (stroke.size / 300) * w);
+    ctx.lineWidth = strokeWidth;
+    ctx.strokeStyle = stroke.color;
+
+    if (stroke.glow) {
+      ctx.shadowColor = stroke.color;
+      ctx.shadowBlur = strokeWidth * 2;
     }
 
-    ctx.beginPath();
-    const first = doodle.points[0];
-    ctx.moveTo((first.x / 100) * w, (first.y / 100) * h);
+    const firstPt = stroke.points[0];
+    ctx.moveTo((firstPt.x / 100) * w, (firstPt.y / 100) * h);
 
-    for (let i = 1; i < doodle.points.length; i++) {
-      const pt = doodle.points[i];
+    for (let i = 1; i < stroke.points.length; i++) {
+      const pt = stroke.points[i];
       ctx.lineTo((pt.x / 100) * w, (pt.y / 100) * h);
     }
 
@@ -354,9 +446,10 @@ const drawDoodles = (
   ctx.restore();
 };
 
-export async function renderStitchCanvas(
+export async function renderStitchedCanvas(
   images: string[],
-  options: StitchOptions
+  options: StitchOptions,
+  customCanvas?: HTMLCanvasElement
 ): Promise<HTMLCanvasElement> {
   const neededPhotos = getPhotoCountForLayout(options.layout);
   if (images.length < neededPhotos) {
@@ -368,7 +461,7 @@ export async function renderStitchCanvas(
   const pW = 800;
   const pH = 600;
 
-  const canvas = document.createElement('canvas');
+  const canvas = customCanvas || document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   if (!ctx) {
     throw new Error('Could not get 2D context');
@@ -376,10 +469,7 @@ export async function renderStitchCanvas(
 
   const padding = 40;
   const gap = 30;
-  
-  // Allocate bottom extra space for date and custom typography captions
-  const hasCaption = options.captionText && options.captionText.trim().length > 0;
-  const bottomExtra = (options.showDate || hasCaption) ? (hasCaption && options.showDate ? 170 : 130) : padding;
+  const bottomExtra = options.showDate ? 130 : padding;
 
   const isTraditional = options.layout === 'traditional-4';
   const finalBgColor = isTraditional ? '#000000' : options.backgroundColor;
@@ -389,8 +479,8 @@ export async function renderStitchCanvas(
     canvas.height = pH * 3 + padding * 2 + gap * 2 + bottomExtra;
 
     if (options.pattern === 'checkerboard') drawCheckerboard(ctx, canvas.width, canvas.height, finalBgColor);
-    else if (options.pattern === 'stars') drawStarsPattern(ctx, canvas.width, canvas.height, finalBgColor);
-    else if (options.pattern === 'cherries') drawCherriesPattern(ctx, canvas.width, canvas.height, finalBgColor);
+    else if (options.pattern === 'stars') drawStars(ctx, canvas.width, canvas.height, finalBgColor);
+    else if (options.pattern === 'cherries') drawCherries(ctx, canvas.width, canvas.height, finalBgColor);
     else if (options.pattern === 'hologradient') drawHoloGradient(ctx, canvas.width, canvas.height);
     else {
       ctx.fillStyle = finalBgColor;
@@ -420,19 +510,44 @@ export async function renderStitchCanvas(
       if (options.filter === 'custom') {
         applyCustomPixelAdjustments(ctx, x, y, pW, pH, options);
       }
+
+      if (options.filter === 'analog-film') {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.fillStyle = 'rgba(120, 160, 110, 0.06)';
+        ctx.globalCompositeOperation = 'soft-light';
+        ctx.fillRect(0, 0, pW, pH);
+        ctx.restore();
+      }
     }
   } else {
     const N = neededPhotos;
     canvas.width = pW + padding * 2;
-    canvas.height = pH * N + padding * 2 + gap * (N - 1) + bottomExtra;
+    canvas.height = padding + pH * N + gap * (N - 1) + bottomExtra;
 
-    if (options.pattern === 'checkerboard') drawCheckerboard(ctx, canvas.width, canvas.height, finalBgColor);
-    else if (options.pattern === 'stars') drawStarsPattern(ctx, canvas.width, canvas.height, finalBgColor);
-    else if (options.pattern === 'cherries') drawCherriesPattern(ctx, canvas.width, canvas.height, finalBgColor);
-    else if (options.pattern === 'hologradient') drawHoloGradient(ctx, canvas.width, canvas.height);
-    else {
-      ctx.fillStyle = finalBgColor;
+    if (isTraditional) {
+      ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+    } else {
+      switch (options.pattern) {
+        case 'checkerboard':
+          drawCheckerboard(ctx, canvas.width, canvas.height, finalBgColor);
+          break;
+        case 'stars':
+          drawStars(ctx, canvas.width, canvas.height, finalBgColor);
+          break;
+        case 'cherries':
+          drawCherries(ctx, canvas.width, canvas.height, finalBgColor);
+          break;
+        case 'hologradient':
+          drawHoloGradient(ctx, canvas.width, canvas.height);
+          break;
+        case 'none':
+        default:
+          ctx.fillStyle = finalBgColor;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          break;
+      }
     }
 
     for (let i = 0; i < N; i++) {
@@ -476,44 +591,6 @@ export async function renderStitchCanvas(
     }
   }
 
-  // 1. Render Custom Typography & Captions
-  if (hasCaption && options.captionText) {
-    ctx.save();
-    const isDarkBg = isColorDark(finalBgColor);
-    const captionColor = options.captionColor || (isDarkBg ? '#FFFFFF' : '#1C1917');
-    ctx.fillStyle = captionColor;
-
-    const fontStyle = options.captionFont || 'bubble';
-    switch (fontStyle) {
-      case 'matrix':
-        ctx.font = '900 34px "Share Tech Mono", monospace';
-        break;
-      case 'bubble':
-        ctx.font = '900 38px "Space Grotesk", sans-serif';
-        break;
-      case 'gothic':
-        ctx.font = 'bold 34px "Georgia", serif';
-        break;
-      case 'handwritten':
-        ctx.font = 'italic bold 38px "Caveat", cursive, sans-serif';
-        break;
-      case 'pixel':
-        ctx.font = '900 28px "Courier New", monospace';
-        break;
-    }
-
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    const captionY = options.showDate 
-      ? canvas.height - bottomExtra + 45 
-      : canvas.height - bottomExtra / 2;
-
-    ctx.fillText(options.captionText.toUpperCase(), canvas.width / 2, captionY);
-    ctx.restore();
-  }
-
-  // 2. Render Date & Time Stamp
   if (options.showDate) {
     const today = new Date();
     const dateText = options.dateStr || today.toLocaleDateString('en-GB', {
@@ -535,14 +612,11 @@ export async function renderStitchCanvas(
     ctx.save();
     const isDarkBg = isColorDark(finalBgColor);
     ctx.fillStyle = isDarkBg ? '#FFFFFF' : '#000000';
-    ctx.font = 'bold 26px "Share Tech Mono", "Courier New", monospace';
+    ctx.font = 'bold 28px "Share Tech Mono", "Courier New", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    const dateY = hasCaption 
-      ? canvas.height - bottomExtra + 115 
-      : canvas.height - bottomExtra / 2;
-
+    const dateY = canvas.height - bottomExtra / 2;
     ctx.fillText(fullStamp, canvas.width / 2, dateY);
     ctx.restore();
   }
@@ -634,10 +708,6 @@ export async function renderStitchCanvas(
     applyFilmGrain(ctx, canvas.width, canvas.height, finalGrain);
   }
 
-  if (options.ditherMode === 'floyd-steinberg') {
-    applyFloydSteinbergDithering(ctx, canvas.width, canvas.height);
-  }
-
   return canvas;
 }
 
@@ -645,102 +715,10 @@ export async function stitchPhotos(
   images: string[],
   options: StitchOptions
 ): Promise<string> {
-  const canvas = await renderStitchCanvas(images, options);
-
+  const canvas = await renderStitchedCanvas(images, options);
   if (options.downloadFormat === 'jpg') {
     return canvas.toDataURL('image/jpeg', 1.0);
   } else {
     return canvas.toDataURL('image/png');
   }
-}
-
-// 4x6" Standard Photo Paper Dual-Strip Generator
-export async function stitchDualPrintSheet(singleStripDataUrl: string): Promise<string> {
-  const img = await loadImage(singleStripDataUrl);
-  const canvas = document.createElement('canvas');
-  // 4x6 inch standard photo paper ratio (1200 x 1800 px at 300 DPI)
-  canvas.width = 1200;
-  canvas.height = 1800;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return singleStripDataUrl;
-
-  // Crisp photo paper background
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const margin = 40;
-  const availableWidth = (canvas.width - margin * 3) / 2;
-  const availableHeight = canvas.height - margin * 2;
-
-  const scale = Math.min(availableWidth / img.naturalWidth, availableHeight / img.naturalHeight);
-  const drawW = img.naturalWidth * scale;
-  const drawH = img.naturalHeight * scale;
-  const yOffset = (canvas.height - drawH) / 2;
-
-  const col1X = margin + (availableWidth - drawW) / 2;
-  const col2X = margin * 2 + availableWidth + (availableWidth - drawW) / 2;
-
-  // Draw Left Strip
-  ctx.drawImage(img, col1X, yOffset, drawW, drawH);
-
-  // Draw Right Strip
-  ctx.drawImage(img, col2X, yOffset, drawW, drawH);
-
-  // Draw Center Scissor Cut Line
-  const centerX = canvas.width / 2;
-  ctx.save();
-  ctx.setLineDash([12, 10]);
-  ctx.strokeStyle = '#888888';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(centerX, margin);
-  ctx.lineTo(centerX, canvas.height - margin);
-  ctx.stroke();
-
-  // Scissor icon annotations
-  ctx.fillStyle = '#555555';
-  ctx.font = '28px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('✂', centerX, margin + 25);
-  ctx.fillText('✂', centerX, canvas.height / 2);
-  ctx.fillText('✂', centerX, canvas.height - margin - 25);
-  ctx.restore();
-
-  return canvas.toDataURL('image/png');
-}
-
-// Looping Animated GIF Generator from Burst Frames
-export async function generateAnimatedGif(
-  burstFrames: string[][],
-  options: StitchOptions
-): Promise<Blob> {
-  const maxFrames = Math.max(...burstFrames.map((b) => (b ? b.length : 1)), 1);
-  const frameSequence: number[] = [];
-  for (let i = 0; i < maxFrames; i++) frameSequence.push(i);
-  // Ping-pong bounce loop
-  for (let i = maxFrames - 2; i > 0; i--) frameSequence.push(i);
-
-  const canvases: HTMLCanvasElement[] = [];
-
-  for (const fIdx of frameSequence) {
-    const currentPhotos = burstFrames.map((b) => {
-      if (!b || b.length === 0) return '';
-      return b[fIdx % b.length] || b[0];
-    });
-
-    const c = await renderStitchCanvas(currentPhotos, options);
-    // Downscale for smooth, fast GIF compilation (e.g. 480px width)
-    const gifCanvas = document.createElement('canvas');
-    const scale = Math.min(1, 480 / c.width);
-    gifCanvas.width = Math.round(c.width * scale);
-    gifCanvas.height = Math.round(c.height * scale);
-    const gCtx = gifCanvas.getContext('2d');
-    if (gCtx) {
-      gCtx.drawImage(c, 0, 0, gifCanvas.width, gifCanvas.height);
-      canvases.push(gifCanvas);
-    }
-  }
-
-  return createAnimatedGifFromCanvases(canvases, 160);
 }

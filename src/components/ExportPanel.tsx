@@ -1,32 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Download, 
-  Image, 
-  Check, 
-  Copy, 
-  Share2, 
-  QrCode, 
-  X, 
-  Sparkles, 
-  CheckCircle2, 
-  RefreshCw, 
-  ExternalLink,
-  Film,
-  Printer,
-  Scissors
-} from 'lucide-react';
+import { Download, Image, Check, Copy, Share2, QrCode, X, Sparkles, CheckCircle2, RefreshCw, ExternalLink, Film } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import QRCode from 'qrcode';
 import { uploadPhotoStripToCloud } from '../utils/photoShareService';
-import { stitchDualPrintSheet, generateAnimatedGif } from '../utils/canvasStitcher';
 import type { StitchOptions } from '../types/photobooth';
 
 interface ExportPanelProps {
   options: StitchOptions;
   onChange: (options: StitchOptions) => void;
   dataUrl: string;
-  burstFrames?: string[][];
-  onOpenThermalModal?: () => void;
+  gifDataUrl?: string | null;
+  onGenerateGif?: () => Promise<string | null>;
+  isGeneratingGif?: boolean;
+  gifProgress?: number;
 }
 
 // In-memory cache for instant zero-latency QR display
@@ -35,9 +21,11 @@ const qrCache = new Map<string, { qrCodeUrl: string; shareUrl: string }>();
 export const ExportPanel: React.FC<ExportPanelProps> = ({ 
   options, 
   onChange, 
-  dataUrl, 
-  burstFrames,
-  onOpenThermalModal 
+  dataUrl,
+  gifDataUrl,
+  onGenerateGif,
+  isGeneratingGif,
+  gifProgress = 0,
 }) => {
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -46,28 +34,22 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
   const [shareablePhotoUrl, setShareablePhotoUrl] = useState<string>('');
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'ready' | 'error'>('idle');
 
-  // GIF generation loading state
-  const [isGeneratingGif, setIsGeneratingGif] = useState(false);
-  const [gifCopied, setGifCopied] = useState(false);
-
-  // 4x6 print sheet loading state
-  const [isGenerating4x6, setIsGenerating4x6] = useState(false);
-
-  const isPng = options.downloadFormat === 'png';
+  const isGif = options.downloadFormat === 'gif';
+  const activeExportDataUrl = isGif && gifDataUrl ? gifDataUrl : dataUrl;
   const filename = `neobooth-${new Date().toISOString().slice(0, 10)}.${options.downloadFormat}`;
   const isMountedRef = useRef(true);
 
-  // Background Pre-Upload: As soon as the photo strip renders, upload in background so the QR is ready immediately
+  // Background Pre-Upload: As soon as the active dataUrl is ready, upload in background so the QR is ready immediately
   useEffect(() => {
     isMountedRef.current = true;
-    if (!dataUrl) return;
+    if (!activeExportDataUrl) return;
 
     let isCancelled = false;
 
     const timer = setTimeout(() => {
       // Check if already in cache
-      if (qrCache.has(dataUrl)) {
-        const cached = qrCache.get(dataUrl)!;
+      if (qrCache.has(activeExportDataUrl)) {
+        const cached = qrCache.get(activeExportDataUrl)!;
         if (isMountedRef.current && !isCancelled) {
           setQrCodeUrl(cached.qrCodeUrl);
           setShareablePhotoUrl(cached.shareUrl);
@@ -83,7 +65,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
             : window.location.origin;
 
         try {
-          const uploadedUrl = await uploadPhotoStripToCloud(dataUrl, filename);
+          const uploadedUrl = await uploadPhotoStripToCloud(activeExportDataUrl, filename);
           if (isCancelled || !uploadedUrl) return;
 
           const directShareLink = `${baseOrigin}/?photo=${encodeURIComponent(uploadedUrl)}`;
@@ -96,7 +78,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
             },
           });
 
-          qrCache.set(dataUrl, { qrCodeUrl: qr, shareUrl: directShareLink });
+          qrCache.set(activeExportDataUrl, { qrCodeUrl: qr, shareUrl: directShareLink });
 
           if (isMountedRef.current && !isCancelled) {
             setQrCodeUrl(qr);
@@ -115,12 +97,20 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
       isCancelled = true;
       clearTimeout(timer);
     };
-  }, [dataUrl, filename]);
+  }, [activeExportDataUrl, filename]);
 
-  const handleOpenQRModal = () => {
+  const handleOpenQRModal = async () => {
     setShowQRModal(true);
-    if (qrCache.has(dataUrl)) {
-      const cached = qrCache.get(dataUrl)!;
+
+    let targetUrl = activeExportDataUrl;
+    if (isGif && !gifDataUrl && onGenerateGif) {
+      setUploadStatus('uploading');
+      const generated = await onGenerateGif();
+      if (generated) targetUrl = generated;
+    }
+
+    if (qrCache.has(targetUrl)) {
+      const cached = qrCache.get(targetUrl)!;
       setQrCodeUrl(cached.qrCodeUrl);
       setShareablePhotoUrl(cached.shareUrl);
       setUploadStatus('ready');
@@ -142,61 +132,32 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
     });
   };
 
-  const setFormat = (format: 'png' | 'jpg') => {
+  const setFormat = (format: 'png' | 'jpg' | 'gif') => {
     onChange({
       ...options,
       downloadFormat: format,
     });
+    if (format === 'gif' && !gifDataUrl && onGenerateGif) {
+      void onGenerateGif();
+    }
   };
 
-  const handleDownload = () => {
+  const handleDownload = async (e: React.MouseEvent) => {
+    if (isGif && !gifDataUrl && onGenerateGif) {
+      e.preventDefault();
+      const generated = await onGenerateGif();
+      if (generated) {
+        triggerConfetti();
+        const a = document.createElement('a');
+        a.href = generated;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+      return;
+    }
     triggerConfetti();
-  };
-
-  // 🎞️ Animated GIF Download Handler
-  const handleDownloadGif = async () => {
-    if (!burstFrames || burstFrames.length === 0 || isGeneratingGif) return;
-    setIsGeneratingGif(true);
-
-    try {
-      const gifBlob = await generateAnimatedGif(burstFrames, options);
-      const url = URL.createObjectURL(gifBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `neobooth-animated-${new Date().toISOString().slice(0, 10)}.gif`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-      setGifCopied(true);
-      triggerConfetti();
-      setTimeout(() => setGifCopied(false), 3000);
-    } catch (err) {
-      console.error('GIF generation failed:', err);
-    } finally {
-      setIsGeneratingGif(false);
-    }
-  };
-
-  // 🖨️ 4x6" Duplicate Printable Sheet Handler
-  const handleDownload4x6Sheet = async () => {
-    if (isGenerating4x6 || !dataUrl) return;
-    setIsGenerating4x6(true);
-
-    try {
-      const dualSheetUrl = await stitchDualPrintSheet(dataUrl);
-      const a = document.createElement('a');
-      a.href = dualSheetUrl;
-      a.download = `neobooth-4x6-dual-strip-${new Date().toISOString().slice(0, 10)}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      triggerConfetti();
-    } catch (err) {
-      console.error('4x6 sheet generation failed:', err);
-    } finally {
-      setIsGenerating4x6(false);
-    }
   };
 
   const handleCopyShareLink = async () => {
@@ -212,13 +173,13 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
 
   const handleCopyToClipboard = async () => {
     try {
-      const res = await fetch(dataUrl);
+      const res = await fetch(activeExportDataUrl);
       const blob = await res.blob();
       
       let clipboardBlob = blob;
       if (blob.type !== 'image/png') {
         const img = document.createElement('img');
-        img.src = dataUrl;
+        img.src = activeExportDataUrl;
         await new Promise((resolve) => { img.onload = resolve; });
         const canvas = document.createElement('canvas');
         canvas.width = img.naturalWidth;
@@ -252,13 +213,13 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
 
   const handleShare = async () => {
     try {
-      const res = await fetch(dataUrl);
+      const res = await fetch(activeExportDataUrl);
       const blob = await res.blob();
       const file = new File([blob], filename, { type: blob.type });
 
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
-          title: 'My NEO.BOOTH Strip',
+          title: isGif ? 'My NEO.BOOTH Animated GIF' : 'My NEO.BOOTH Strip',
           text: 'Captured on NEO.BOOTH // Y2K Retro Photobooth 📸✨',
           files: [file],
         });
@@ -291,39 +252,57 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
       </h3>
 
       <div className="flex flex-col gap-2">
-        <span className="text-xs font-mono uppercase tracking-widest text-cream-400">Download Quality</span>
-        <div className="grid grid-cols-2 gap-2">
+        <span className="text-xs font-mono uppercase tracking-widest text-cream-400">Export Format</span>
+        <div className="grid grid-cols-3 gap-2">
           <button
             onClick={() => setFormat('png')}
-            className={`flex flex-col items-start p-3 border-2 border-cream-900 rounded-xl transition-all font-sans text-left relative cursor-pointer ${
-              isPng 
+            className={`flex flex-col items-start p-2.5 border-2 border-cream-900 rounded-xl transition-all font-sans text-left relative cursor-pointer ${
+              options.downloadFormat === 'png'
                 ? 'bg-pastelpink-50 shadow-none translate-x-[1px] translate-y-[1px]' 
                 : 'bg-white hover:bg-cream-50 shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none'
             }`}
           >
-            <div className="flex items-center gap-1.5 font-bold text-xs uppercase text-cream-900">
-              PNG Format
-              {isPng && <Check className="w-3.5 h-3.5 text-pastelpink-500" />}
+            <div className="flex items-center gap-1 font-bold text-xs uppercase text-cream-900">
+              PNG
+              {options.downloadFormat === 'png' && <Check className="w-3 h-3 text-pastelpink-500" />}
             </div>
-            <span className="text-[10px] font-mono text-cream-500 leading-normal mt-0.5">
-              Lossless. Best sharpness for frames, stickers & text.
+            <span className="text-[9px] font-mono text-cream-500 leading-tight mt-0.5">
+              Lossless. Sharp stickers & text.
             </span>
           </button>
 
           <button
             onClick={() => setFormat('jpg')}
-            className={`flex flex-col items-start p-3 border-2 border-cream-900 rounded-xl transition-all font-sans text-left relative cursor-pointer ${
-              !isPng 
+            className={`flex flex-col items-start p-2.5 border-2 border-cream-900 rounded-xl transition-all font-sans text-left relative cursor-pointer ${
+              options.downloadFormat === 'jpg'
                 ? 'bg-pastelpink-50 shadow-none translate-x-[1px] translate-y-[1px]' 
                 : 'bg-white hover:bg-cream-50 shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none'
             }`}
           >
-            <div className="flex items-center gap-1.5 font-bold text-xs uppercase text-cream-900">
-              JPG Format
-              {!isPng && <Check className="w-3.5 h-3.5 text-pastelpink-500" />}
+            <div className="flex items-center gap-1 font-bold text-xs uppercase text-cream-900">
+              JPG
+              {options.downloadFormat === 'jpg' && <Check className="w-3 h-3 text-pastelpink-500" />}
             </div>
-            <span className="text-[10px] font-mono text-cream-500 leading-normal mt-0.5">
-              100% Max Quality. Best photo realism. Smaller size.
+            <span className="text-[9px] font-mono text-cream-500 leading-tight mt-0.5">
+              100% Quality. Ultra fast.
+            </span>
+          </button>
+
+          <button
+            onClick={() => setFormat('gif')}
+            className={`flex flex-col items-start p-2.5 border-2 border-cream-900 rounded-xl transition-all font-sans text-left relative cursor-pointer ${
+              options.downloadFormat === 'gif'
+                ? 'bg-emerald-50 border-emerald-900 shadow-none translate-x-[1px] translate-y-[1px]' 
+                : 'bg-white hover:bg-cream-50 shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none'
+            }`}
+          >
+            <div className="flex items-center gap-1 font-bold text-xs uppercase text-emerald-900">
+              <Film className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+              GIF
+              {options.downloadFormat === 'gif' && <Check className="w-3 h-3 text-emerald-600" />}
+            </div>
+            <span className="text-[9px] font-mono text-emerald-700 leading-tight mt-0.5 font-bold">
+              Live Boomerang Loop! 🎞️
             </span>
           </button>
         </div>
@@ -351,62 +330,26 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
         )}
       </div>
 
-      {/* Main Download Button */}
       <a
-        href={dataUrl}
+        href={activeExportDataUrl}
         download={filename}
         onClick={handleDownload}
-        className="flex items-center justify-center gap-3 w-full py-4 bg-cream-900 text-white border-2 border-cream-900 rounded-xl font-bold uppercase text-base md:text-lg transition-all shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo-sm active:translate-x-[4px] active:translate-y-[4px] active:shadow-none cursor-pointer text-center"
+        className={`flex items-center justify-center gap-3 w-full py-4 text-white border-2 border-cream-900 rounded-xl font-bold uppercase text-base md:text-lg transition-all shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo-sm active:translate-x-[4px] active:translate-y-[4px] active:shadow-none cursor-pointer text-center ${
+          isGif ? 'bg-emerald-900 hover:bg-emerald-800' : 'bg-cream-900 hover:bg-cream-800'
+        }`}
       >
-        <Download className="w-5 h-5" />
-        Download {options.downloadFormat.toUpperCase()} Strip
+        {isGeneratingGif ? (
+          <>
+            <RefreshCw className="w-5 h-5 animate-spin" />
+            <span>Encoding GIF ({gifProgress}%)...</span>
+          </>
+        ) : (
+          <>
+            {isGif ? <Film className="w-5 h-5" /> : <Download className="w-5 h-5" />}
+            <span>Download {options.downloadFormat.toUpperCase()} Strip</span>
+          </>
+        )}
       </a>
-
-      {/* 🎞️ Animated GIF and 🖨️ 4x6 Dual-Strip Advanced Exporters */}
-      <div className="grid grid-cols-2 gap-2 pt-1 border-t-2 border-cream-100">
-        <button
-          onClick={handleDownloadGif}
-          disabled={isGeneratingGif}
-          className="flex items-center justify-center gap-2 p-3 bg-pastelpink-100 hover:bg-pastelpink-200 text-cream-900 border-2 border-cream-900 rounded-xl font-bold uppercase text-xs shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer disabled:opacity-60 text-left"
-        >
-          {isGeneratingGif ? (
-            <RefreshCw className="w-4 h-4 animate-spin text-pastelpink-600" />
-          ) : gifCopied ? (
-            <Check className="w-4 h-4 text-emerald-600" />
-          ) : (
-            <Film className="w-4 h-4 text-pastelpink-600" />
-          )}
-          <span className="truncate">
-            {isGeneratingGif ? 'Compiling GIF...' : gifCopied ? 'GIF Saved!' : 'Animated GIF'}
-          </span>
-        </button>
-
-        <button
-          onClick={handleDownload4x6Sheet}
-          disabled={isGenerating4x6}
-          title="Download 4x6 inch standard photo paper sheet with 2 cut-strips"
-          className="flex items-center justify-center gap-2 p-3 bg-amber-50 hover:bg-amber-100 text-cream-900 border-2 border-cream-900 rounded-xl font-bold uppercase text-xs shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer disabled:opacity-60 text-left"
-        >
-          {isGenerating4x6 ? (
-            <RefreshCw className="w-4 h-4 animate-spin text-amber-600" />
-          ) : (
-            <Scissors className="w-4 h-4 text-amber-700" />
-          )}
-          <span className="truncate">
-            {isGenerating4x6 ? 'Rendering Sheet...' : '4x6" Dual Print'}
-          </span>
-        </button>
-      </div>
-
-      {onOpenThermalModal && (
-        <button
-          onClick={onOpenThermalModal}
-          className="w-full py-2.5 bg-zinc-100 hover:bg-zinc-200 text-cream-900 border-2 border-cream-900 rounded-xl font-bold text-xs uppercase flex items-center justify-center gap-2 shadow-neo-sm hover:translate-y-[1px] cursor-pointer"
-        >
-          <Printer className="w-4 h-4 text-cream-900" />
-          Thermal Pocket Printer Mode
-        </button>
-      )}
 
       {/* Dedicated Per-Photo Mobile QR Code Sharing Modal */}
       {showQRModal && (
@@ -424,10 +367,10 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
             </div>
 
             <h4 className="text-xl font-black uppercase tracking-tight text-cream-900 mb-1">
-              Save on Smartphone
+              Save {isGif ? 'Animated GIF' : 'Photo'} on Phone
             </h4>
             <p className="text-xs text-cream-600 font-medium mb-4">
-              Scan this QR code with your phone camera to instantly download your photo strip to your camera roll!
+              Scan this QR code with your phone camera to instantly download your {isGif ? 'animated boomerang strip' : 'photo strip'} to your camera roll!
             </p>
 
             <div className="p-3 bg-cream-50 border-3 border-cream-900 rounded-2xl shadow-neo-sm mb-4 relative min-h-[220px] w-full flex items-center justify-center">
@@ -464,7 +407,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-center gap-2 p-2 bg-emerald-100 border-2 border-emerald-900 rounded-xl text-[11px] font-mono font-bold text-emerald-900 uppercase">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    Ultra-Crisp QR Ready! Scan with phone
+                    {isGif ? 'Animated GIF QR Ready!' : 'Ultra-Crisp QR Ready!'} Scan with phone
                   </div>
 
                   {shareablePhotoUrl && (

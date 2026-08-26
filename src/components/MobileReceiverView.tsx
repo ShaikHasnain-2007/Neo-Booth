@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Download, Share2, Camera, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Download, Share2, Camera, CheckCircle2, AlertCircle, RefreshCw, Film } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { motion } from 'framer-motion';
 
@@ -17,6 +17,8 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
     return queryPhoto && queryPhoto !== 'local' ? queryPhoto : null;
   });
 
+  const isGif = currentPhoto?.includes('.gif') || currentPhoto?.startsWith('data:image/gif');
+
   const [status] = useState<'loading' | 'received' | 'error'>(() => {
     if (photoUrl) return 'received';
     if (typeof window === 'undefined') return 'loading';
@@ -27,7 +29,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
 
   const [downloading, setDownloading] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
-  const filename = 'neobooth-photostrip.jpg';
+  const filename = isGif ? 'neobooth-live-strip.gif' : 'neobooth-photostrip.jpg';
 
   useEffect(() => {
     if (status === 'received') {
@@ -40,11 +42,18 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
     }
   }, [status]);
 
-  // Convert the displayed image into a clean, 100% uncorrupted high-res JPEG Blob
-  const getPristineJpgBlob = async (): Promise<Blob> => {
+  // Convert the displayed image into a clean Blob (preserves full GIF animation if GIF)
+  const getPristineBlob = async (): Promise<Blob> => {
     if (!currentPhoto) throw new Error('No photo source');
 
-    // 1. If image element is loaded in DOM, bake it directly onto canvas
+    // For GIFs, directly fetch arrayBuffer to preserve all frames and animation timings
+    if (isGif) {
+      const res = await fetch(currentPhoto);
+      const arrayBuffer = await res.arrayBuffer();
+      return new Blob([arrayBuffer], { type: 'image/gif' });
+    }
+
+    // 1. If static image element is loaded in DOM, bake it directly onto canvas
     if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0) {
       const img = imgRef.current;
       const canvas = document.createElement('canvas');
@@ -74,13 +83,14 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
     setDownloading(true);
 
     try {
-      const blob = await getPristineJpgBlob();
-      const file = new File([blob], filename, { type: 'image/jpeg' });
+      const blob = await getPristineBlob();
+      const mimeType = isGif ? 'image/gif' : 'image/jpeg';
+      const file = new File([blob], filename, { type: mimeType });
 
       // 1. Try native Web Share API (Triggers native iOS/Android "Save Image / Save to Photos")
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
-          title: 'My NEO.BOOTH Strip',
+          title: isGif ? 'My NEO.BOOTH Animated GIF' : 'My NEO.BOOTH Strip',
           text: 'Captured on NEO.BOOTH // Y2K Retro Photobooth 📸✨',
           files: [file],
         });
@@ -117,12 +127,13 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
     if (!currentPhoto || downloading) return;
     setDownloading(true);
     try {
-      const blob = await getPristineJpgBlob();
-      const file = new File([blob], filename, { type: 'image/jpeg' });
+      const blob = await getPristineBlob();
+      const mimeType = isGif ? 'image/gif' : 'image/jpeg';
+      const file = new File([blob], filename, { type: mimeType });
 
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
-          title: 'My NEO.BOOTH Strip',
+          title: isGif ? 'My NEO.BOOTH Animated GIF' : 'My NEO.BOOTH Strip',
           text: 'Captured on NEO.BOOTH // Y2K Retro Photobooth 📸✨',
           files: [file],
         });
@@ -143,14 +154,14 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
         <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-pastelpink-300 via-sage-300 to-maroon-800" />
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-pastelpink-200 border-2 border-cream-900 flex items-center justify-center rotate-3 shadow-neo-sm">
-            <Camera className="w-4 h-4 text-cream-900" />
+            {isGif ? <Film className="w-4 h-4 text-cream-900" /> : <Camera className="w-4 h-4 text-cream-900" />}
           </div>
           <div>
             <h1 className="text-base font-bold uppercase tracking-wider leading-none text-cream-900">
               NEO.BOOTH <span className="text-[9px] font-mono text-pastelpink-500 font-bold px-1 py-0.5 border border-pastelpink-300 rounded bg-pastelpink-50">v2.0</span>
             </h1>
             <p className="text-[8px] font-mono uppercase tracking-widest text-cream-600 mt-0.5">
-              ✦ Mobile Photo Delivery ✦
+              ✦ {isGif ? 'Animated GIF Delivery' : 'Mobile Photo Delivery'} ✦
             </p>
           </div>
         </div>
@@ -173,7 +184,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
               <RefreshCw className="w-8 h-8 animate-spin text-pastelpink-500" />
             </div>
             <div>
-              <h2 className="text-xl font-bold uppercase text-cream-900">Loading Photo Strip</h2>
+              <h2 className="text-xl font-bold uppercase text-cream-900">Loading {isGif ? 'Animated GIF' : 'Photo Strip'}</h2>
               <p className="text-xs text-cream-500 mt-1 font-mono uppercase">
                 Fetching your high-resolution strip...
               </p>
@@ -213,10 +224,10 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
           >
             <div className="flex items-center gap-2 bg-emerald-100 border-2 border-emerald-900 text-emerald-900 px-4 py-1.5 rounded-full text-xs font-bold uppercase shadow-neo-sm">
               <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-              Photo Strip Ready!
+              {isGif ? 'Animated Boomerang Strip Ready! 🎞️' : 'Photo Strip Ready! 📸'}
             </div>
 
-            {/* Photo Strip Frame Preview with iOS touch-to-save support */}
+            {/* Photo Strip Frame Preview */}
             <div className="p-3 bg-[#eae8e1] border-3 border-cream-900 rounded-2xl shadow-neo max-w-[280px] w-full flex flex-col items-center">
               <img
                 ref={imgRef}
@@ -248,7 +259,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
                 ) : (
                   <>
                     <Download className="w-4 h-4" />
-                    Save to Camera Roll / Download
+                    Save {isGif ? 'Animated GIF' : 'Photo'} to Photos
                   </>
                 )}
               </button>

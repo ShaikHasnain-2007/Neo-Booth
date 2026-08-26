@@ -6,7 +6,7 @@ import { playBeep, playShutter, playClick } from '../utils/audioEngine';
 interface PoseRetakeModalProps {
   poseIndex: number;
   totalPoses: number;
-  onRetakeComplete: (newPhoto: string, index: number) => void;
+  onRetakeComplete: (newPhoto: string, index: number, newBurst?: string[]) => void;
   onClose: () => void;
 }
 
@@ -27,6 +27,8 @@ export const PoseRetakeModal: React.FC<PoseRetakeModalProps> = ({
   const [showFlash, setShowFlash] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const burstIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const retakeBurstRef = useRef<string[]>([]);
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -71,6 +73,7 @@ export const PoseRetakeModal: React.FC<PoseRetakeModalProps> = ({
       clearTimeout(initTimer);
       stopCamera();
       if (intervalRef.current) clearInterval(intervalRef.current);
+      if (burstIntervalRef.current) clearInterval(burstIntervalRef.current);
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [facingMode, startCamera, stopCamera]);
@@ -119,6 +122,18 @@ export const PoseRetakeModal: React.FC<PoseRetakeModalProps> = ({
     playClick();
     setCountdown(3);
     playBeep(800, 0.08);
+    retakeBurstRef.current = [];
+
+    if (burstIntervalRef.current) clearInterval(burstIntervalRef.current);
+    burstIntervalRef.current = setInterval(() => {
+      const frame = capturePhoto();
+      if (frame) {
+        retakeBurstRef.current.push(frame);
+        if (retakeBurstRef.current.length > 8) {
+          retakeBurstRef.current.shift();
+        }
+      }
+    }, 110);
 
     let count = 3;
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -131,6 +146,12 @@ export const PoseRetakeModal: React.FC<PoseRetakeModalProps> = ({
       } else {
         if (intervalRef.current) clearInterval(intervalRef.current);
         intervalRef.current = null;
+
+        if (burstIntervalRef.current) {
+          clearInterval(burstIntervalRef.current);
+          burstIntervalRef.current = null;
+        }
+
         setCountdown(null);
         setShowFlash(true);
         playShutter();
@@ -141,7 +162,10 @@ export const PoseRetakeModal: React.FC<PoseRetakeModalProps> = ({
           setShowFlash(false);
           if (photo) {
             stopCamera();
-            onRetakeComplete(photo, poseIndex);
+            const finalBurst = retakeBurstRef.current.length >= 2 
+              ? [...retakeBurstRef.current, photo] 
+              : [photo];
+            onRetakeComplete(photo, poseIndex, finalBurst);
           }
         }, 250);
       }

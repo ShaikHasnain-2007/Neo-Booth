@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Camera, Sparkles, RefreshCw, Volume2, VolumeX, FolderUp, Maximize2 } from 'lucide-react';
+import { Camera, Sparkles, RefreshCw, Volume2, VolumeX, Upload, FolderUp, Film } from 'lucide-react';
 import { WebcamCapture } from './components/WebcamCapture';
 import { CustomizationBar } from './components/CustomizationBar';
 import { ExportPanel } from './components/ExportPanel';
 import { DoodleCanvas } from './components/DoodleCanvas';
 import { PoseRetakeModal } from './components/PoseRetakeModal';
 import { MobileReceiverView } from './components/MobileReceiverView';
-import { ThermalPrintModal } from './components/ThermalPrintModal';
-import { KioskModeModal } from './components/KioskModeModal';
 import { stitchPhotos, getPhotoCountForLayout, clearImageCache } from './utils/canvasStitcher';
+import { stitchAnimatedGif } from './utils/gifStitcher';
 import type { StitchOptions, StickerInstance, DoodlePath } from './types/photobooth';
 import { layoutsList } from './constants/photobooth';
 import { setSoundEnabled, playClick } from './utils/audioEngine';
@@ -18,18 +17,15 @@ import confetti from 'canvas-confetti';
 function App() {
   const [view, setView] = useState<'landing' | 'layout-select' | 'booth' | 'result'>('landing');
   const [photos, setPhotos] = useState<string[]>([]);
-  const [burstFrames, setBurstFrames] = useState<string[][]>([]);
+  const [poseBursts, setPoseBursts] = useState<string[][]>([]);
   const [stitchedPhoto, setStitchedPhoto] = useState<string>('');
   const [soundEnabled, setSoundEnabledState] = useState(true);
 
-  // Modals state
-  const [showThermalModal, setShowThermalModal] = useState(false);
-  const [showKioskModal, setShowKioskModal] = useState(false);
-
-  // Kiosk Party Mode State
-  const [kioskActive, setKioskActive] = useState(false);
-  const [kioskAutoResetSec, setKioskAutoResetSec] = useState(30);
-  const [kioskCountdown, setKioskCountdown] = useState<number | null>(null);
+  // Live GIF Boomerang State
+  const [previewTab, setPreviewTab] = useState<'still' | 'gif'>('still');
+  const [gifDataUrl, setGifDataUrl] = useState<string | null>(null);
+  const [isGeneratingGif, setIsGeneratingGif] = useState<boolean>(false);
+  const [gifProgress, setGifProgress] = useState<number>(0);
 
   // Mobile Photo Delivery Mode (initialized directly from URL search params)
   const [photoUrl, setPhotoUrl] = useState<string | null>(() => {
@@ -63,10 +59,6 @@ function App() {
     customG: 0,
     customB: 0,
     customBrightness: 0,
-    captionText: '',
-    captionFont: 'bubble',
-    captionColor: '#1C1917',
-    ditherMode: 'none',
   });
 
   const [stickers, setStickers] = useState<StickerInstance[]>([]);
@@ -76,19 +68,6 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [containerWidth, setContainerWidth] = useState(300);
   const [containerHeight, setContainerHeight] = useState(500);
-
-  const resetSession = useCallback(() => {
-    playClick();
-    clearImageCache();
-    setPhotos([]);
-    setBurstFrames([]);
-    setStitchedPhoto('');
-    setStickers([]);
-    setDoodles([]);
-    setSelectedStickerId(null);
-    setRetakePoseIndex(null);
-    setView('landing');
-  }, []);
 
   useEffect(() => {
     const element = previewContainerRef.current;
@@ -107,7 +86,7 @@ function App() {
 
     observer.observe(element);
     return () => observer.disconnect();
-  }, [stitchedPhoto, view]);
+  }, [stitchedPhoto, view, previewTab, gifDataUrl]);
 
   useEffect(() => {
     setSoundEnabled(soundEnabled);
@@ -125,6 +104,8 @@ function App() {
             doodles,
           });
           setStitchedPhoto(result);
+          // Invalidate cached GIF when options, stickers, or doodles change
+          setGifDataUrl(null);
         } catch (err) {
           console.error('Failed to stitch photos:', err);
         }
@@ -135,39 +116,41 @@ function App() {
     }
   }, [photos, options, stickers, doodles]);
 
-  // Kiosk Mode Auto-Reset Countdown when on Results view
-  useEffect(() => {
-    if (!kioskActive || view !== 'result') return;
-
-    const interval = setInterval(() => {
-      setKioskCountdown((prev) => {
-        if (prev === null) return kioskAutoResetSec;
-        if (prev <= 1) {
-          clearInterval(interval);
-          resetSession();
-          return null;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    const initTimer = setTimeout(() => {
-      setKioskCountdown(kioskAutoResetSec);
-    }, 0);
-
-    return () => {
-      clearTimeout(initTimer);
-      clearInterval(interval);
-    };
-  }, [kioskActive, view, kioskAutoResetSec, resetSession]);
-
-  const handleCaptureComplete = (capturedPhotos: string[], capturedBurstFrames?: string[][]) => {
-    setPhotos(capturedPhotos);
-    if (capturedBurstFrames) {
-      setBurstFrames(capturedBurstFrames);
-    } else {
-      setBurstFrames(capturedPhotos.map((p) => [p]));
+  const handleGenerateGif = useCallback(async (): Promise<string | null> => {
+    if (photos.length === 0) return null;
+    setIsGeneratingGif(true);
+    setGifProgress(10);
+    try {
+      const result = await stitchAnimatedGif(
+        photos,
+        {
+          ...options,
+          stickers,
+          doodles,
+          poseBursts,
+        },
+        { boomerang: true, scale: 0.5 },
+        (percent) => setGifProgress(percent)
+      );
+      setGifDataUrl(result.dataUrl);
+      return result.dataUrl;
+    } catch (err) {
+      console.error('GIF generation failed:', err);
+      return null;
+    } finally {
+      setIsGeneratingGif(false);
     }
+  }, [photos, options, stickers, doodles, poseBursts]);
+
+  const handleCaptureComplete = (capturedPhotos: string[], capturedBursts?: string[][]) => {
+    setPhotos(capturedPhotos);
+    if (capturedBursts && capturedBursts.length > 0) {
+      setPoseBursts(capturedBursts);
+    } else {
+      setPoseBursts([]);
+    }
+    setGifDataUrl(null);
+    setPreviewTab('still');
     setView('result');
     confetti({
       particleCount: 100,
@@ -201,7 +184,9 @@ function App() {
 
         setOptions((prev) => ({ ...prev, layout: selectedLayout }));
         setPhotos(uploadedPhotos);
-        setBurstFrames(uploadedPhotos.map((p) => [p]));
+        setPoseBursts([]);
+        setGifDataUrl(null);
+        setPreviewTab('still');
         setView('result');
         confetti({
           particleCount: 100,
@@ -234,6 +219,21 @@ function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [view, selectedStickerId, deleteSticker]);
+
+  const resetSession = () => {
+    playClick();
+    clearImageCache();
+    setPhotos([]);
+    setPoseBursts([]);
+    setStitchedPhoto('');
+    setGifDataUrl(null);
+    setPreviewTab('still');
+    setStickers([]);
+    setDoodles([]);
+    setSelectedStickerId(null);
+    setRetakePoseIndex(null);
+    setView('landing');
+  };
 
   const addSticker = (type: string) => {
     playClick();
@@ -277,17 +277,20 @@ function App() {
     setSelectedStickerId(null);
   };
 
-  const handleRetakeComplete = (newPhoto: string, index: number) => {
+  const handleRetakeComplete = (newPhoto: string, index: number, newBurst?: string[]) => {
     setPhotos((prev) => {
       const updated = [...prev];
       updated[index] = newPhoto;
       return updated;
     });
-    setBurstFrames((prev) => {
-      const updated = [...prev];
-      updated[index] = [newPhoto];
-      return updated;
-    });
+    if (newBurst && newBurst.length > 0) {
+      setPoseBursts((prev) => {
+        const updated = [...prev];
+        updated[index] = newBurst;
+        return updated;
+      });
+    }
+    setGifDataUrl(null);
     setRetakePoseIndex(null);
     confetti({
       particleCount: 60,
@@ -327,12 +330,12 @@ function App() {
     };
 
     const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
     };
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
   };
 
   const handleStickerTouchStart = (e: React.TouchEvent, id: string) => {
@@ -342,23 +345,21 @@ function App() {
     if (!container) return;
 
     const rect = container.getBoundingClientRect();
+    const touch = e.touches[0];
+    const startX = touch.clientX;
+    const startY = touch.clientY;
 
-    if (e.touches.length === 1) {
-      const touch = e.touches[0];
-      const startX = touch.clientX;
-      const startY = touch.clientY;
+    const sticker = stickers.find((s) => s.id === id);
+    if (!sticker) return;
 
-      const sticker = stickers.find((s) => s.id === id);
-      if (!sticker) return;
+    const startXPercent = sticker.x;
+    const startYPercent = sticker.y;
 
-      const startXPercent = sticker.x;
-      const startYPercent = sticker.y;
-
-      const handleTouchMove = (moveEvent: TouchEvent) => {
-        if (moveEvent.touches.length !== 1) return;
-        const currentTouch = moveEvent.touches[0];
-        const deltaX = currentTouch.clientX - startX;
-        const deltaY = currentTouch.clientY - startY;
+    const handleTouchMove = (moveEvent: TouchEvent) => {
+      if (moveEvent.touches.length > 0) {
+        const moveTouch = moveEvent.touches[0];
+        const deltaX = moveTouch.clientX - startX;
+        const deltaY = moveTouch.clientY - startY;
 
         const deltaXPercent = (deltaX / rect.width) * 100;
         const deltaYPercent = (deltaY / rect.height) * 100;
@@ -367,55 +368,16 @@ function App() {
         const newY = Math.max(0, Math.min(100, startYPercent + deltaYPercent));
 
         updateSticker(id, { x: newX, y: newY });
-      };
+      }
+    };
 
-      const handleTouchEnd = () => {
-        document.removeEventListener('touchmove', handleTouchMove);
-        document.removeEventListener('touchend', handleTouchEnd);
-      };
+    const handleTouchEnd = () => {
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
 
-      document.addEventListener('touchmove', handleTouchMove, { passive: true });
-      document.addEventListener('touchend', handleTouchEnd);
-    } else if (e.touches.length === 2) {
-      const t1 = e.touches[0];
-      const t2 = e.touches[1];
-
-      const initialDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-      const initialAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX) * (180 / Math.PI);
-
-      const sticker = stickers.find((s) => s.id === id);
-      if (!sticker) return;
-
-      const initialScale = sticker.scale;
-      const initialRotation = sticker.rotation;
-
-      const handlePinchMove = (moveEvent: TouchEvent) => {
-        if (moveEvent.touches.length === 2) {
-          const mt1 = moveEvent.touches[0];
-          const mt2 = moveEvent.touches[1];
-
-          const currDist = Math.hypot(mt2.clientX - mt1.clientX, mt2.clientY - mt1.clientY);
-          const currAngle = Math.atan2(mt2.clientY - mt1.clientY, mt2.clientX - mt1.clientX) * (180 / Math.PI);
-
-          const scaleFactor = currDist / initialDist;
-          const newScale = Math.max(0.4, Math.min(3.0, initialScale * scaleFactor));
-          const newRotation = (initialRotation + (currAngle - initialAngle) + 360) % 360;
-
-          updateSticker(id, {
-            scale: parseFloat(newScale.toFixed(2)),
-            rotation: Math.round(newRotation),
-          });
-        }
-      };
-
-      const handlePinchEnd = () => {
-        document.removeEventListener('touchmove', handlePinchMove);
-        document.removeEventListener('touchend', handlePinchEnd);
-      };
-
-      document.addEventListener('touchmove', handlePinchMove, { passive: true });
-      document.addEventListener('touchend', handlePinchEnd);
-    }
+    window.addEventListener('touchmove', handleTouchMove);
+    window.addEventListener('touchend', handleTouchEnd);
   };
 
   const getEmojiForSticker = (type: string): string | null => {
@@ -430,10 +392,6 @@ function App() {
       case 'flower': return '🌸';
       case 'lightning': return '⚡';
       case 'teddy': return '🧸';
-      case 'ribbon': return '🎀';
-      case 'fire': return '🔥';
-      case 'kiss': return '💋';
-      case 'crown': return '👑';
       default: return null;
     }
   };
@@ -449,309 +407,399 @@ function App() {
   };
 
   const handleToggleSound = () => {
-    const newState = !soundEnabled;
-    setSoundEnabledState(newState);
-    setSoundEnabled(newState);
-    playClick();
+    setSoundEnabledState((prev) => {
+      const next = !prev;
+      setSoundEnabled(next);
+      if (next) playClick();
+      return next;
+    });
   };
 
   const isTraditionalSelected = options.layout === 'traditional-4';
 
-  // If opened via Photo QR Code (?photo=...), show the Mobile Receiver Screen
+  // If user opens the website via a mobile photo share link (?photo=...)
   if (photoUrl) {
     return (
-      <MobileReceiverView
-        photoUrl={photoUrl}
+      <MobileReceiverView 
+        photoUrl={photoUrl} 
         onGoToBooth={() => {
-          window.history.replaceState({}, '', window.location.pathname);
           setPhotoUrl(null);
+          window.history.replaceState({}, '', window.location.pathname);
           setView('landing');
-        }}
+        }} 
       />
     );
   }
 
   return (
-    <div className="min-h-screen y2k-grid flex flex-col justify-between p-3 md:p-5 lg:p-6 relative">
+    <div className="min-h-screen y2k-grid flex flex-col justify-between p-3 md:p-6 select-none">
       {/* Hidden File Input for Image Upload Mode */}
       <input
         type="file"
         ref={fileInputRef}
         onChange={handleFileUpload}
-        multiple
         accept="image/*"
+        multiple
         className="hidden"
       />
 
-      {(view === 'landing' || view === 'layout-select') && (
-        <header className="w-full max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between border-3 border-cream-900 bg-white p-3 md:p-4 rounded-2xl shadow-neo mb-4 relative overflow-hidden">
+      {/* Header */}
+      {view !== 'booth' && (
+        <header className="w-full max-w-5xl mx-auto flex items-center justify-between border-3 border-cream-900 bg-white p-3 md:p-4 rounded-2xl shadow-neo relative overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-pastelpink-300 via-sage-300 to-maroon-800" />
           
-          <div className="flex items-center gap-3 mt-1">
-            <div className="w-10 h-10 rounded-xl bg-pastelpink-200 border-2 border-cream-900 flex items-center justify-center rotate-3 shadow-neo-sm">
-              <Camera className="w-5 h-5 text-cream-900" />
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="w-9 h-9 md:w-11 md:h-11 rounded-xl bg-pastelpink-200 border-2 border-cream-900 flex items-center justify-center rotate-3 shadow-neo-sm">
+              <Camera className="w-5 h-5 md:w-6 md:h-6 text-cream-900" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold uppercase tracking-wider m-0 leading-none flex items-center gap-1">
-                NEO.BOOTH <span className="text-xs font-mono text-pastelpink-500 font-bold px-1.5 py-0.5 border border-pastelpink-300 rounded bg-pastelpink-50">v2.0</span>
+              <h1 className="text-xl md:text-2xl font-bold uppercase tracking-wider leading-none text-cream-900 flex items-center gap-1.5">
+                NEO.BOOTH <span className="text-[10px] md:text-xs font-mono text-pastelpink-500 font-bold px-1.5 py-0.5 border border-pastelpink-300 rounded bg-pastelpink-50">v2.0</span>
               </h1>
-              <p className="text-[10px] font-mono uppercase tracking-widest text-cream-600 mt-1">
-                ✦ Tokyo-Retro / Gen-Z Photobooth ✦
+              <p className="text-[9px] md:text-[10px] font-mono uppercase tracking-widest text-cream-600 mt-0.5">
+                ✦ Y2K Retro Photobooth & Live Strip ✦
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 mt-3 md:mt-0 font-mono text-xs font-bold uppercase">
-            {/* Event Kiosk Mode Button */}
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowKioskModal(true)}
-              title="Party & Event Kiosk Mode"
-              className={`flex items-center gap-1.5 px-3 py-1 border-2 border-cream-900 rounded-lg shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer ${
-                kioskActive ? 'bg-amber-300 text-cream-900 ring-2 ring-cream-900' : 'bg-amber-100 hover:bg-amber-200 text-cream-900'
-              }`}
+              onClick={() => fileInputRef.current?.click()}
+              title="Upload photos from gallery"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-2 border-2 border-cream-900 rounded-xl shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none bg-white hover:bg-cream-100 text-cream-900 transition-all cursor-pointer font-mono text-xs font-bold uppercase"
             >
-              <Maximize2 className="w-4 h-4" />
-              <span>{kioskActive ? 'Kiosk Active' : 'Kiosk Mode'}</span>
+              <Upload className="w-3.5 h-3.5 text-cream-800" />
+              <span className="hidden sm:inline">Upload</span>
             </button>
 
             <button
               onClick={handleToggleSound}
-              className={`flex items-center gap-1.5 px-3 py-1 border-2 border-cream-900 rounded-lg shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-2 border-2 border-cream-900 rounded-xl shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all cursor-pointer font-mono text-xs font-bold uppercase ${
                 soundEnabled ? 'bg-pastelpink-100 text-cream-900' : 'bg-cream-100 text-cream-500'
               }`}
             >
-              {soundEnabled ? (
-                <>
-                  <Volume2 className="w-4 h-4" />
-                  Sound On
-                </>
-              ) : (
-                <>
-                  <VolumeX className="w-4 h-4" />
-                  Muted
-                </>
-              )}
+              {soundEnabled ? <Volume2 className="w-3 h-3 md:w-3.5 md:h-3.5" /> : <VolumeX className="w-3 h-3 md:w-3.5 md:h-3.5" />}
+              <span>{soundEnabled ? 'Sound On' : 'Muted'}</span>
             </button>
           </div>
         </header>
       )}
 
-      {/* Main Container */}
-      <main className="flex-1 flex flex-col items-center justify-center my-auto">
+      <main className={`flex-1 w-full max-w-5xl mx-auto flex ${view === 'result' ? 'items-start pt-24 lg:pt-6 xl:pt-2' : 'items-center'} justify-center py-2 md:py-4`}>
         <AnimatePresence mode="wait">
 
-          {/* VIEW: LANDING */}
           {view === 'landing' && (
             <motion.div
-              key="landing"
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -15 }}
-              className="flex flex-col items-center text-center max-w-lg bg-white border-3 border-cream-900 p-8 rounded-3xl shadow-neo relative"
+              className="w-full max-w-xl bg-white border-3 border-cream-900 rounded-3xl p-5 md:p-8 shadow-neo text-center relative overflow-hidden"
             >
-              <div className="w-16 h-16 rounded-2xl bg-pastelpink-200 border-2 border-cream-900 flex items-center justify-center -rotate-6 shadow-neo-sm mb-4">
-                <Sparkles className="w-8 h-8 text-cream-900" />
+              <div className="absolute -top-12 -right-12 w-32 h-32 bg-pastelpink-100 rounded-full blur-2xl opacity-60" />
+              
+              <div className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-cream-900 text-white rounded-full text-xs font-mono uppercase tracking-widest mb-4">
+                ✦ No login required • Free forever ✦
               </div>
 
-              <h2 className="text-3xl font-black uppercase tracking-tight text-cream-900 mb-2">
-                Snap, Deco, Print & Share
+              <h2 className="text-3xl md:text-4xl font-black uppercase tracking-tight text-cream-900 leading-none mb-3 md:mb-4">
+                Capture the Moment, <br />
+                <span className="text-pastelpink-500 underline decoration-wavy decoration-pastelpink-300">Y2K Style.</span>
               </h2>
-              <p className="text-sm text-cream-700 mb-6 font-medium leading-relaxed">
-                Step into the Y2K photobooth. Live Purikura filters, animated GIF boomerang strips, instant QR sharing, and 4x6 print layouts!
+
+              <p className="text-cream-600 font-medium text-xs md:text-sm max-w-sm mx-auto mb-4 md:mb-6">
+                Welcome to the retro digital photo booth. Select your layout, snap live animated motion or upload photos, draw glowing neon brush doodles, place stickers, and beam straight to your phone!
               </p>
 
-              <div className="flex flex-col gap-3 w-full">
-                <button
-                  onClick={() => {
-                    playClick();
-                    setView('layout-select');
-                  }}
-                  className="flex items-center justify-center gap-2 py-4 bg-pastelpink-200 hover:bg-pastelpink-300 text-cream-900 border-3 border-cream-900 rounded-2xl font-bold uppercase text-base shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo-sm active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all cursor-pointer"
-                >
-                  <Camera className="w-5 h-5" />
-                  Start Camera Photobooth
-                </button>
-
-                <button
-                  onClick={() => {
-                    playClick();
-                    fileInputRef.current?.click();
-                  }}
-                  className="flex items-center justify-center gap-2 py-3 bg-cream-50 hover:bg-cream-100 text-cream-900 border-2 border-cream-900 rounded-xl font-bold uppercase text-xs shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer"
-                >
-                  <FolderUp className="w-4 h-4 text-pastelpink-500" />
-                  Upload Photos from Device
-                </button>
-              </div>
-            </motion.div>
-          )}
-
-          {/* VIEW: LAYOUT SELECTION */}
-          {view === 'layout-select' && (
-            <motion.div
-              key="layout-select"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="flex flex-col items-center text-center max-w-2xl w-full bg-white border-3 border-cream-900 p-6 md:p-8 rounded-3xl shadow-neo"
-            >
-              <h2 className="text-2xl md:text-3xl font-black uppercase text-cream-900 mb-1">
-                Choose Strip Layout
-              </h2>
-              <p className="text-xs text-cream-600 mb-6 font-mono uppercase">
-                Select your preferred photobooth frame style
-              </p>
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 md:gap-4 w-full mb-6">
-                {layoutsList.map((layout) => (
-                  <button
-                    key={layout.id}
-                    onClick={() => {
-                      playClick();
-                      setOptions((prev) => ({ ...prev, layout: layout.id }));
-                      setView('booth');
-                    }}
-                    className={`flex flex-col items-center p-4 border-2 border-cream-900 rounded-2xl transition-all font-sans relative cursor-pointer ${
-                      options.layout === layout.id
-                        ? 'bg-pastelpink-100 shadow-none translate-x-[2px] translate-y-[2px]'
-                        : 'bg-white hover:bg-cream-50 shadow-neo hover:translate-x-[1px] hover:translate-y-[1px]'
-                    }`}
-                  >
-                    <div className="text-2xl mb-2">
-                      {layout.id === 'vertical-4' ? '🎞️' :
-                       layout.id === 'vertical-3' ? '📷' :
-                       layout.id === 'vertical-2' ? '📸' :
-                       layout.id === 'grid-6' ? '🖼️' : '🎞️'}
-                    </div>
-                    <div className="font-bold text-sm uppercase text-cream-900">{layout.name}</div>
-                    <span className="text-[10px] font-mono text-cream-500 mt-1">{layout.description}</span>
-                  </button>
-                ))}
-              </div>
-
-              <button
-                onClick={() => {
-                  playClick();
-                  setView('landing');
-                }}
-                className="px-6 py-2 bg-cream-100 hover:bg-cream-200 text-cream-900 border-2 border-cream-900 rounded-xl font-bold text-xs uppercase cursor-pointer"
-              >
-                Back
-              </button>
-            </motion.div>
-          )}
-
-          {/* VIEW: BOOTH (LIVE WEBCAM) */}
-          {view === 'booth' && (
-            <motion.div
-              key="booth"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="w-full flex flex-col items-center"
-            >
-              <div className="w-full max-w-4xl flex items-center justify-between mb-3 px-2">
-                <button
-                  onClick={() => {
-                    playClick();
-                    setView('layout-select');
-                  }}
-                  className="px-4 py-1.5 bg-white text-cream-900 border-2 border-cream-900 rounded-xl font-bold text-xs uppercase shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none cursor-pointer"
-                >
-                  ← Change Layout
-                </button>
-
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-bold text-cream-700 uppercase bg-pastelpink-100 px-3 py-1 border-2 border-cream-900 rounded-lg">
-                    {getPhotoCountForLayout(options.layout)} Poses
-                  </span>
+              <div className="grid grid-cols-2 gap-3 max-w-md mx-auto mb-6 md:mb-8 text-left font-mono text-[11px] md:text-xs font-bold text-cream-700">
+                <div className="flex items-center gap-2 p-2 md:p-2.5 bg-cream-50 border-2 border-cream-200 rounded-xl">
+                  <span className="w-5 h-5 rounded-lg bg-pastelpink-200 flex items-center justify-center text-cream-900 text-xs">1</span>
+                  Choose Layout & Poses
+                </div>
+                <div className="flex items-center gap-2 p-2 md:p-2.5 bg-cream-50 border-2 border-cream-200 rounded-xl">
+                  <span className="w-5 h-5 rounded-lg bg-sage-200 flex items-center justify-center text-cream-900 text-xs">2</span>
+                  Stitch vertically/grid
+                </div>
+                <div className="flex items-center gap-2 p-2 md:p-2.5 bg-cream-50 border-2 border-cream-200 rounded-xl">
+                  <span className="w-5 h-5 rounded-lg bg-cream-200 flex items-center justify-center text-cream-900 text-xs">3</span>
+                  Live Boomerang & Doodles
+                </div>
+                <div className="flex items-center gap-2 p-2 md:p-2.5 bg-cream-50 border-2 border-cream-200 rounded-xl">
+                  <span className="w-5 h-5 rounded-lg bg-maroon-50 bg-opacity-50 flex items-center justify-center text-cream-900 text-xs">4</span>
+                  Beam to Mobile via QR
                 </div>
               </div>
 
-              <WebcamCapture
-                onCaptureComplete={handleCaptureComplete}
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                <button
+                  onClick={() => {
+                    playClick();
+                    setView('layout-select');
+                  }}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-pastelpink-200 text-cream-900 border-3 border-cream-900 rounded-2xl font-bold text-base md:text-lg uppercase tracking-wide hover:bg-pastelpink-300 shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo-sm active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all group cursor-pointer"
+                >
+                  <Camera className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                  Enter Photobooth
+                </button>
+
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white text-cream-900 border-3 border-cream-900 rounded-2xl font-bold text-sm uppercase tracking-wide hover:bg-cream-100 shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer"
+                >
+                  <Upload className="w-4 h-4 text-cream-700" />
+                  Upload Photos
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {view === 'layout-select' && (
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              className="w-full max-w-4xl bg-white border-3 border-cream-900 rounded-3xl p-5 md:p-6 shadow-neo text-center relative overflow-hidden"
+            >
+              <h2 className="text-3xl md:text-4xl font-black uppercase tracking-tight text-cream-900 mb-1 md:mb-2">
+                Choose your layout
+              </h2>
+              <p className="text-cream-500 font-medium text-xs md:text-sm mb-4 md:mb-6">
+                Select a layout for your photo session. You can shoot live poses or upload files.
+              </p>
+
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4 mb-4 md:mb-6">
+                {layoutsList.map((lay) => {
+                  const isSelected = options.layout === lay.id;
+                  const isTraditional = lay.id === 'traditional-4';
+                  
+                  return (
+                    <button
+                      key={lay.id}
+                      onClick={() => {
+                        playClick();
+                        setOptions(prev => ({ ...prev, layout: lay.id }));
+                      }}
+                      className={`flex flex-col items-center p-2 md:p-3 border-3 rounded-2xl transition-all shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none bg-cream-50/50 cursor-pointer ${
+                        isSelected
+                          ? 'border-pink-500 ring-4 ring-pink-300 ring-offset-2 scale-102 bg-white'
+                          : 'border-cream-900 hover:bg-cream-100/30'
+                      }`}
+                    >
+                      <div
+                        className="h-28 sm:h-36 md:h-40 aspect-[1/3.2] rounded-lg border-2 border-cream-900 p-1 flex flex-col gap-0.5 overflow-hidden relative mx-auto"
+                        style={{ backgroundColor: isTraditional ? '#000000' : '#FFFFFF' }}
+                      >
+                        {isTraditional ? (
+                          <>
+                            {[...Array(lay.poses)].map((_, i) => (
+                              <div key={i} className="flex-1 bg-zinc-800 border-[1.5px] border-white rounded-sm flex items-center justify-center">
+                                <Camera className="w-4 h-4 text-white/40" />
+                              </div>
+                            ))}
+                            <div className="h-1.5 w-full flex items-center justify-center">
+                              <div className="w-8 h-0.5 bg-white/30 rounded-full" />
+                            </div>
+                          </>
+                        ) : lay.style === 'grid' ? (
+                          <div className="flex-1 grid grid-cols-2 gap-0.5">
+                            {[...Array(6)].map((_, i) => (
+                              <div key={i} className="bg-cream-200 rounded border border-cream-900/10 flex items-center justify-center">
+                                <Camera className="w-3 h-3 text-cream-400" />
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <>
+                            {[...Array(lay.poses)].map((_, i) => (
+                              <div key={i} className="flex-1 bg-cream-200 rounded border border-cream-900/10 flex items-center justify-center">
+                                <Camera className="w-3 h-3 text-cream-400" />
+                              </div>
+                            ))}
+                            <div className="h-1.5 w-full flex items-center justify-center">
+                              <div className="w-8 h-0.5 bg-cream-400/40 rounded-full" />
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      <span className="font-bold text-xs md:text-sm text-cream-900 mt-2 md:mt-3 leading-tight">{lay.name}</span>
+                      <span className="font-mono text-[10px] md:text-xs text-cream-500 mt-1">{lay.description}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-wrap justify-center gap-3">
+                <button
+                  onClick={() => {
+                    playClick();
+                    setView('landing');
+                  }}
+                  className="px-5 py-2.5 border-2 border-cream-900 bg-white font-bold text-xs md:text-sm uppercase rounded-xl shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer"
+                >
+                  Back
+                </button>
+                
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-cream-100 hover:bg-cream-200 text-cream-900 border-2 border-cream-900 rounded-xl font-bold text-xs md:text-sm uppercase shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer"
+                >
+                  <FolderUp className="w-4 h-4" />
+                  Upload Photos
+                </button>
+
+                <button
+                  onClick={() => {
+                    playClick();
+                    setView('booth');
+                  }}
+                  className="inline-flex items-center gap-1.5 px-6 py-2.5 bg-pastelpink-200 text-cream-900 border-2 border-cream-900 rounded-xl font-bold text-base uppercase tracking-wide hover:bg-pastelpink-300 shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo-sm active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all cursor-pointer"
+                >
+                  Proceed to Booth
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {view === 'booth' && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full flex flex-col items-center gap-4"
+            >
+              <div className="flex items-center justify-between w-full max-w-4xl px-2">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      playClick();
+                      setView('layout-select');
+                    }}
+                    className="px-4 py-2 border-2 border-cream-900 bg-white font-bold text-xs uppercase rounded-xl shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer font-sans"
+                  >
+                    ← Back to Layouts
+                  </button>
+                  
+                  <button
+                    onClick={handleToggleSound}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 border-2 border-cream-900 rounded-lg shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all cursor-pointer font-mono text-[10px] font-bold uppercase ${
+                      soundEnabled ? 'bg-pastelpink-100 text-cream-900' : 'bg-cream-100 text-cream-500'
+                    }`}
+                  >
+                    {soundEnabled ? (
+                      <>
+                        <Volume2 className="w-3.5 h-3.5" />
+                        Sound On
+                      </>
+                    ) : (
+                      <>
+                        <VolumeX className="w-3.5 h-3.5" />
+                        Muted
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <span className="font-mono text-xs font-bold uppercase text-cream-500">
+                  Step 2: Take Poses ({getPhotoCountForLayout(options.layout)} Poses)
+                </span>
+              </div>
+              <WebcamCapture 
+                onCaptureComplete={handleCaptureComplete} 
                 photoCount={getPhotoCountForLayout(options.layout)}
                 isTraditional={isTraditionalSelected}
               />
             </motion.div>
           )}
 
-          {/* VIEW: RESULT (CUSTOMIZATION & EXPORT) */}
           {view === 'result' && (
             <motion.div
-              key="result"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex flex-col lg:flex-row items-center lg:items-start justify-center gap-6 w-full max-w-5xl relative"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              className="w-full flex flex-col lg:flex-row gap-8 items-start justify-center"
             >
-              {/* Kiosk Mode Auto-Reset Banner */}
-              {kioskActive && kioskCountdown !== null && (
-                <div className="w-full lg:col-span-2 bg-amber-200 border-3 border-cream-900 rounded-2xl p-3 shadow-neo flex items-center justify-between text-xs font-mono font-bold text-cream-900">
-                  <div className="flex items-center gap-2">
-                    <Maximize2 className="w-4 h-4 text-amber-800 animate-pulse" />
-                    <span>🎪 Kiosk Mode: Auto-resetting for next guest in {kioskCountdown}s</span>
-                  </div>
-                  <div className="flex items-center gap-2">
+              <div className="w-full lg:w-1/2 flex flex-col items-center gap-4">
+                <div className="flex items-center justify-between w-full max-w-md px-2 lg:px-0">
+                  {/* Preview Tab Selector (Still vs Live Boomerang GIF) */}
+                  <div className="flex items-center gap-1.5 bg-white p-1 border-2 border-cream-900 rounded-xl shadow-neo-sm">
                     <button
-                      onClick={() => setKioskCountdown(kioskAutoResetSec)}
-                      className="px-3 py-1 bg-white hover:bg-cream-50 border-2 border-cream-900 rounded-lg shadow-neo-sm hover:shadow-none cursor-pointer"
+                      onClick={() => setPreviewTab('still')}
+                      className={`flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-bold uppercase rounded-lg transition-all cursor-pointer ${
+                        previewTab === 'still'
+                          ? 'bg-pastelpink-200 text-cream-900 border border-cream-900 shadow-sm'
+                          : 'text-cream-600 hover:text-cream-900'
+                      }`}
                     >
-                      Keep Editing
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>📸 Still</span>
                     </button>
-                    <button
-                      onClick={() => setKioskActive(false)}
-                      className="px-2 py-1 bg-red-100 hover:bg-red-200 text-red-700 border-2 border-red-700 rounded-lg cursor-pointer"
-                    >
-                      Exit Kiosk
-                    </button>
-                  </div>
-                </div>
-              )}
 
-              {/* Strip Preview Container */}
-              <div className="flex flex-col items-center gap-3 w-full lg:w-1/2">
-                <div className="flex items-center justify-between w-full max-w-sm px-1">
+                    <button
+                      onClick={() => {
+                        setPreviewTab('gif');
+                        if (!gifDataUrl) {
+                          void handleGenerateGif();
+                        }
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-bold uppercase rounded-lg transition-all cursor-pointer ${
+                        previewTab === 'gif'
+                          ? 'bg-emerald-200 text-emerald-950 border border-emerald-900 shadow-sm'
+                          : 'text-cream-600 hover:text-cream-900'
+                      }`}
+                    >
+                      <Film className="w-3.5 h-3.5 text-emerald-700 animate-pulse" />
+                      <span>🎞️ Live GIF</span>
+                    </button>
+                  </div>
+
                   <button
                     onClick={resetSession}
-                    className="px-4 py-1.5 bg-white hover:bg-cream-50 text-cream-900 border-2 border-cream-900 rounded-xl font-bold text-xs uppercase shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 border-2 border-cream-900 bg-white font-bold text-xs uppercase rounded-lg shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer"
                   >
-                    ← Start Over
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Retake All
                   </button>
-                  <span className="font-mono text-xs font-bold text-cream-600 uppercase">
-                    Interactive Preview
-                  </span>
                 </div>
 
-                <div 
-                  ref={previewContainerRef}
-                  style={{
-                    '--container-width': `${containerWidth}px`,
-                    '--container-height': `${containerHeight}px`,
-                  } as React.CSSProperties}
-                  className="relative p-3 bg-[#eae8e1] border-4 border-cream-900 rounded-2xl shadow-neo max-w-sm w-full flex flex-col items-center"
-                >
+                <div className="relative w-full max-w-md flex justify-center p-4 bg-[#eae8e1] border-3 border-cream-900 rounded-3xl shadow-neo-lg overflow-hidden">
+                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-pastelpink-300 via-sage-300 to-maroon-800" />
+                  
                   {stitchedPhoto ? (
-                    <div className="relative w-full flex flex-col items-center">
-                      <img
-                        src={stitchedPhoto}
-                        alt="Stitched Photo Strip"
-                        className="w-full h-auto object-contain rounded shadow select-none"
+                    <div 
+                      ref={previewContainerRef}
+                      onClick={() => setSelectedStickerId(null)}
+                      className="relative w-fit max-w-full select-none cursor-default"
+                      style={{ '--container-width': `${containerWidth}px` } as React.CSSProperties}
+                    >
+                      <motion.img
+                        key={previewTab === 'gif' && gifDataUrl ? 'gif' : 'still'}
+                        initial={{ opacity: 0, scale: 0.98 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.2 }}
+                        src={previewTab === 'gif' && gifDataUrl ? gifDataUrl : stitchedPhoto}
+                        alt="Your Stitched Photo Strip"
+                        className="max-h-[72vh] min-w-[220px] w-auto border-2 border-cream-900 rounded shadow-md pointer-events-none select-none block"
                       />
 
-                      {/* Purikura Neon Doodle Overlay Canvas */}
-                      {doodleActive && (
-                        <DoodleCanvas
-                          active={doodleActive}
-                          currentColor={doodleColor}
-                          currentSize={doodleSize}
-                          glowEnabled={doodleGlow}
-                          doodles={doodles}
-                          onAddDoodle={(newDoodle) => setDoodles((prev) => [...prev, newDoodle])}
-                          width={containerWidth}
-                          height={containerHeight}
-                        />
+                      {/* GIF Generation Overlay Spinner */}
+                      {previewTab === 'gif' && !gifDataUrl && isGeneratingGif && (
+                        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm rounded flex flex-col items-center justify-center gap-2 text-white font-mono text-xs uppercase z-30">
+                          <RefreshCw className="w-7 h-7 animate-spin text-pastelpink-300" />
+                          <span className="font-bold">Rendering Live Boomerang ({gifProgress}%)...</span>
+                        </div>
                       )}
+
+                      {/* Purikura Neon Brush Overlay Canvas */}
+                      <DoodleCanvas
+                        active={doodleActive}
+                        doodles={doodles}
+                        onAddDoodle={(newDoodle) => setDoodles((prev) => [...prev, newDoodle])}
+                        currentColor={doodleColor}
+                        currentSize={doodleSize}
+                        glowEnabled={doodleGlow}
+                        width={containerWidth}
+                        height={containerHeight}
+                      />
 
                       {/* Interactive Stickers Layer */}
                       {stickers.map((sticker) => {
@@ -827,15 +875,15 @@ function App() {
                     </div>
                   ) : (
                     <div className="w-[300px] h-[500px] flex flex-col items-center justify-center gap-3 bg-white border-2 border-cream-900 rounded font-mono text-xs font-bold uppercase text-cream-400">
-                      <RefreshCw className="w-6 h-6 animate-spin text-pastelpink-400" />
-                      Rendering Strip...
+                      <Sparkles className="w-8 h-8 animate-spin text-pastelpink-500" />
+                      <span>Stitching Photos...</span>
                     </div>
                   )}
                 </div>
               </div>
 
               {/* Controls Column */}
-              <div className="w-full lg:w-1/2 flex flex-col gap-6 max-w-md">
+              <div className="w-full lg:w-1/2 flex flex-col gap-6">
                 <CustomizationBar 
                   options={options} 
                   onChange={setOptions} 
@@ -870,16 +918,17 @@ function App() {
                     playClick();
                     setDoodles([]);
                   }}
-                  onOpenThermalModal={() => setShowThermalModal(true)}
                 />
 
                 {stitchedPhoto && (
                   <ExportPanel 
                     options={options} 
                     onChange={setOptions} 
-                    dataUrl={stitchedPhoto}
-                    burstFrames={burstFrames}
-                    onOpenThermalModal={() => setShowThermalModal(true)}
+                    dataUrl={stitchedPhoto} 
+                    gifDataUrl={gifDataUrl}
+                    onGenerateGif={handleGenerateGif}
+                    isGeneratingGif={isGeneratingGif}
+                    gifProgress={gifProgress}
                   />
                 )}
               </div>
@@ -896,27 +945,6 @@ function App() {
           totalPoses={photos.length}
           onRetakeComplete={handleRetakeComplete}
           onClose={() => setRetakePoseIndex(null)}
-        />
-      )}
-
-      {/* Floyd-Steinberg Thermal Printer Modal */}
-      {showThermalModal && stitchedPhoto && (
-        <ThermalPrintModal
-          sourceDataUrl={stitchedPhoto}
-          onClose={() => setShowThermalModal(false)}
-        />
-      )}
-
-      {/* Party / Event Kiosk Mode Modal */}
-      {showKioskModal && (
-        <KioskModeModal
-          isOpen={showKioskModal}
-          onClose={() => setShowKioskModal(false)}
-          onActivate={(timerSec) => {
-            setKioskAutoResetSec(timerSec);
-            setKioskActive(true);
-            if (view === 'landing') setView('layout-select');
-          }}
         />
       )}
 
