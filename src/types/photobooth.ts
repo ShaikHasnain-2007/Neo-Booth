@@ -39,6 +39,27 @@ export interface DoodlePath {
   glow: boolean;
 }
 
+export type VirtualBackdropId = 
+  | 'none' 
+  | 'blur' 
+  | 'transparent' 
+  | 'y2k-bliss' 
+  | 'cyberpunk-tokyo' 
+  | 'retro-laser' 
+  | 'sakura-pastel' 
+  | 'vaporwave-sunset' 
+  | 'minimal-studio' 
+  | 'custom';
+
+export interface VirtualBackdrop {
+  id: VirtualBackdropId;
+  name: string;
+  preview: string;
+  type: 'css' | 'gradient' | 'blur' | 'transparent' | 'image';
+  bgValue?: string;
+  imageUrl?: string;
+}
+
 export interface StitchOptions {
   layout: LayoutType;
   backgroundColor: string;
@@ -58,6 +79,8 @@ export interface StitchOptions {
   stickers?: StickerInstance[];
   doodles?: DoodlePath[];
   poseBursts?: string[][];
+  virtualBackdrop?: VirtualBackdropId;
+  customBackdropImage?: string;
 }
 
 export interface GifExportOptions {
