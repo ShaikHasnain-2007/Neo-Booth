@@ -1,18 +1,15 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, RefreshCw, AlertTriangle, CheckCircle2, SwitchCamera, Sparkles, Wand2 } from 'lucide-react';
+import { Camera, RefreshCw, AlertTriangle, CheckCircle2, SwitchCamera } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { playBeep, playShutter, playClick } from '../utils/audioEngine';
 import { renderARFilters, getNoiseCanvases } from '../utils/arFilters';
-import { renderSegmentedUserWithBackdrop } from '../utils/backgroundSegmenter';
-import { virtualBackdropsList } from '../constants/photobooth';
-import type { FaceLandmarker, HandLandmarker, ImageSegmenter } from '@mediapipe/tasks-vision';
+import type { FaceLandmarker, HandLandmarker } from '@mediapipe/tasks-vision';
 import type { 
   ARFilter, 
   NormalizedLandmark, 
   PixelLandmark, 
   HeartParticle, 
-  FilterImages,
-  VirtualBackdropType
+  FilterImages 
 } from '../types/photobooth';
 
 interface WebcamCaptureProps {
@@ -34,18 +31,14 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
   
   const landmarkerRef = useRef<FaceLandmarker | null>(null);
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
-  const segmenterRef = useRef<ImageSegmenter | null>(null);
   const lastLandmarksRef = useRef<NormalizedLandmark[] | null>(null);
   const lastHandmarksRef = useRef<NormalizedLandmark[][] | null>(null);
   const lastDimensionsRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
-  const lastMaskRef = useRef<{ data: Float32Array; width: number; height: number } | null>(null);
 
   const [permissionState, setPermissionState] = useState<'prompt' | 'granted' | 'denied'>('prompt');
   const [errorMessage, setErrorMessage] = useState('');
   const [isModelLoading, setIsModelLoading] = useState(true);
   const [activeFilters, setActiveFilters] = useState<ARFilter[]>([]);
-  const [activeBackdrop, setActiveBackdrop] = useState<VirtualBackdropType>('none');
-  const [drawerTab, setDrawerTab] = useState<'filters' | 'backdrops'>('filters');
   const [hasLandmarker, setHasLandmarker] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
 
@@ -81,7 +74,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
     filterImagesRef.current.tulip = img2;
   }, []);
 
-  // Initialize MediaPipe FaceLandmarker, HandLandmarker, and ImageSegmenter
+  // Initialize MediaPipe FaceLandmarker and HandLandmarker
   useEffect(() => {
     let active = true;
     async function loadMediaPipe() {
@@ -91,7 +84,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm"
         );
         
-        const [faceLandmarker, handLandmarker, imageSegmenter] = await Promise.all([
+        const [faceLandmarker, handLandmarker] = await Promise.all([
           vision.FaceLandmarker.createFromOptions(filesetResolver, {
             baseOptions: {
               modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
@@ -108,27 +101,17 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
             },
             runningMode: "VIDEO",
             numHands: 2
-          }),
-          vision.ImageSegmenter.createFromOptions(filesetResolver, {
-            baseOptions: {
-              modelAssetPath: "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.task",
-              delegate: "GPU"
-            },
-            runningMode: "VIDEO",
-            outputCategoryMask: false,
-            outputConfidenceMasks: true
           })
         ]);
 
         if (active) {
           landmarkerRef.current = faceLandmarker;
           handLandmarkerRef.current = handLandmarker;
-          segmenterRef.current = imageSegmenter;
           setHasLandmarker(true);
           setIsModelLoading(false);
         }
       } catch (err) {
-        console.error("Failed to load MediaPipe models:", err);
+        console.error("Failed to load MediaPipe models (AR filters disabled):", err);
         if (active) {
           setIsModelLoading(false);
         }
@@ -137,9 +120,12 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
     loadMediaPipe();
     return () => {
       active = false;
-      if (landmarkerRef.current) landmarkerRef.current.close();
-      if (handLandmarkerRef.current) handLandmarkerRef.current.close();
-      if (segmenterRef.current) segmenterRef.current.close();
+      if (landmarkerRef.current) {
+        landmarkerRef.current.close();
+      }
+      if (handLandmarkerRef.current) {
+        handLandmarkerRef.current.close();
+      }
     };
   }, []);
 
@@ -172,20 +158,19 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
       streamRef.current = stream;
       setPermissionState('granted');
     } catch (err: unknown) {
-      console.error('Camera access error:', err);
       if (!isMountedRef.current) return;
+      console.error('Webcam access error:', err);
       setPermissionState('denied');
       const errorObj = err as Error;
-      if (errorObj.name === 'NotAllowedError') {
-        setErrorMessage('Camera access was denied. Please allow camera access in your browser settings.');
-      } else if (errorObj.name === 'NotFoundError') {
-        setErrorMessage('No camera was found on your device.');
-      } else {
-        setErrorMessage('Could not access camera. Please check your browser permissions.');
-      }
+      setErrorMessage(
+        errorObj.name === 'NotAllowedError'
+          ? 'Camera access denied. Please enable camera permissions in your browser settings.'
+          : 'Could not access camera. Please check if another app is using it.'
+      );
     }
   }, [facingMode, stopWebcam]);
 
+  // Handle camera mount and facingMode updates
   useEffect(() => {
     isMountedRef.current = true;
     const initTimer = setTimeout(() => {
@@ -196,25 +181,22 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
       isMountedRef.current = false;
       clearTimeout(initTimer);
       stopWebcam();
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      if (burstIntervalRef.current) clearInterval(burstIntervalRef.current);
       if (timerRef.current) clearTimeout(timerRef.current);
+      if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [startWebcam, stopWebcam]);
+  }, [facingMode, startWebcam, stopWebcam]);
 
   useEffect(() => {
     if (permissionState === 'granted' && streamRef.current && videoRef.current) {
       videoRef.current.srcObject = streamRef.current;
       videoRef.current.play().catch(err => {
-        console.error("Video play failed:", err);
+        console.error("Video play failed in mount effect:", err);
       });
     }
   }, [permissionState]);
 
-  // Main high-performance render loop
+  // High performance canvas rendering loop with Face Mesh mapping
   useEffect(() => {
-    if (permissionState !== 'granted') return;
-
     let animationId: number;
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -252,20 +234,18 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
           sy = (videoH - sHeight) / 2;
         }
 
-        const cropDims = { sx, sy, sWidth, sHeight, targetW, targetH };
+        // Draw camera frame
+        ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
 
-        // Process MediaPipe AI Models (Segmentation & Landmarks)
+        // Detect landmarks and apply overlay
         const landmarker = landmarkerRef.current;
         const handLandmarker = handLandmarkerRef.current;
-        const segmenter = segmenterRef.current;
-
         if (video.currentTime !== lastVideoTime) {
           lastVideoTime = video.currentTime;
-          const now = performance.now();
           
           if (landmarker) {
             try {
-              const results = landmarker.detectForVideo(video, now);
+              const results = landmarker.detectForVideo(video, performance.now());
               if (results.faceLandmarks && results.faceLandmarks.length > 0) {
                 lastLandmarksRef.current = results.faceLandmarks[0];
                 lastDimensionsRef.current = { width: videoW, height: videoH };
@@ -277,7 +257,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
 
           if (handLandmarker) {
             try {
-              const handResults = handLandmarker.detectForVideo(video, now);
+              const handResults = handLandmarker.detectForVideo(video, performance.now());
               if (handResults.landmarks && handResults.landmarks.length > 0) {
                 lastHandmarksRef.current = handResults.landmarks;
               } else {
@@ -289,45 +269,9 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
           } else {
             lastHandmarksRef.current = null;
           }
-
-          // Real-time AI Selfie Segmentation for Virtual Backdrops
-          if (activeBackdrop !== 'none' && segmenter) {
-            try {
-              segmenter.segmentForVideo(video, now, (segResults) => {
-                if (segResults.confidenceMasks && segResults.confidenceMasks.length > 0) {
-                  const mask = segResults.confidenceMasks[0];
-                  const maskData = mask.getAsFloat32Array();
-                  lastMaskRef.current = {
-                    data: maskData,
-                    width: mask.width,
-                    height: mask.height,
-                  };
-                }
-              });
-            } catch (err) {
-              console.error("Segmentation error:", err);
-            }
-          }
         }
 
-        // Draw Base Frame: Virtual Backdrop Studio or Standard Camera
-        if (activeBackdrop !== 'none' && lastMaskRef.current) {
-          renderSegmentedUserWithBackdrop(
-            ctx,
-            video,
-            lastMaskRef.current.data,
-            lastMaskRef.current.width,
-            lastMaskRef.current.height,
-            activeBackdrop,
-            targetW,
-            targetH,
-            cropDims
-          );
-        } else {
-          ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-        }
-
-        // Render AR Face Filters and Hand Gestures on Top
+        // Render AR Filters and Hand Gestures
         const cachedLandmarks = lastLandmarksRef.current;
         const dims = lastDimensionsRef.current;
         if (dims.width > 0 && dims.height > 0) {
@@ -348,7 +292,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
             lastHandHeartSpawnTimeRef,
             lastHandmarksRef.current,
             dims,
-            cropDims
+            { sx, sy, sWidth, sHeight, targetW, targetH }
           );
         }
 
@@ -377,7 +321,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
     return () => {
       cancelAnimationFrame(animationId);
     };
-  }, [activeFilters, activeBackdrop, hasLandmarker, permissionState]);
+  }, [activeFilters, hasLandmarker, permissionState]);
 
   const captureFrame = useCallback((): string | null => {
     const canvas = canvasRef.current;
@@ -511,21 +455,27 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
 
         {permissionState === 'prompt' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-cream-100 p-6">
-            <RefreshCw className="w-12 h-12 animate-spin text-pastelpink-300 mb-4" />
-            <p className="font-mono text-sm uppercase tracking-wider text-center">
-              Requesting Camera Permission...
-            </p>
+            <RefreshCw className="w-12 h-12 mb-4 animate-spin text-pastelpink-400" />
+            <p className="text-xl font-bold uppercase tracking-wider">Accessing Camera...</p>
+          </div>
+        )}
+
+        {permissionState === 'granted' && isModelLoading && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-cream-900/60 text-cream-100 p-6 z-40 backdrop-blur-md">
+            <RefreshCw className="w-12 h-12 mb-4 animate-spin text-pastelpink-400" />
+            <p className="text-xl font-bold uppercase tracking-wider text-center">Loading AR Engine...</p>
+            <p className="text-[10px] text-cream-300 font-mono mt-2 uppercase tracking-widest">Calibrating face tracker</p>
           </div>
         )}
 
         {permissionState === 'denied' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-cream-100 p-6 bg-red-950/80 backdrop-blur-sm">
-            <AlertTriangle className="w-12 h-12 text-red-400 mb-4" />
-            <p className="font-bold text-center text-base mb-2">Camera Access Blocked</p>
-            <p className="text-xs text-center max-w-md text-red-200 mb-6">{errorMessage}</p>
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-cream-100 p-6 bg-red-950/20 backdrop-blur-sm">
+            <AlertTriangle className="w-16 h-16 mb-4 text-pastelpink-400" />
+            <h3 className="text-xl font-bold uppercase tracking-wider mb-2 text-pastelpink-400">Camera Access Blocked</h3>
+            <p className="text-center text-sm text-cream-200 max-w-md mb-6">{errorMessage}</p>
             <button
-              onClick={startWebcam}
-              className="px-5 py-2.5 bg-white text-cream-900 font-bold rounded-xl border-2 border-cream-900 shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer font-mono text-xs uppercase"
+              onClick={() => void startWebcam()}
+              className="px-6 py-2 bg-cream-50 text-cream-900 border-2 border-cream-900 rounded-xl font-bold uppercase hover:bg-pastelpink-100 hover:text-pastelpink-500 shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer"
             >
               Try Again
             </button>
@@ -534,153 +484,131 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
 
         {permissionState === 'granted' && (
           <>
+            {/* Hidden Video Feed */}
             <video
               ref={videoRef}
+              autoPlay
               playsInline
               muted
-              className="absolute inset-0 w-full h-full object-cover hidden"
+              onLoadedMetadata={(e) => {
+                e.currentTarget.play().catch(err => console.error("Video play failed:", err));
+              }}
+              className="hidden"
             />
+
+            {/* Live Canvas Viewport */}
             <canvas
               ref={canvasRef}
               width={800}
               height={600}
-              className="w-full h-full object-cover block"
+              className={`w-full h-full object-cover relative z-10 ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
             />
 
-            {/* Model Loading Badge */}
-            {isModelLoading && (
-              <div className="absolute top-4 left-4 z-30 bg-black/60 backdrop-blur-sm border border-white/20 px-2.5 py-1 rounded-full flex items-center gap-1.5 text-[10px] font-mono text-white/80">
-                <RefreshCw className="w-3 h-3 animate-spin text-pastelpink-400" />
-                <span>Loading AI models...</span>
-              </div>
-            )}
-
-            {/* Camera Switcher Toggle */}
-            <button
-              onClick={toggleCameraFacing}
-              title="Switch Camera (Front / Back)"
-              className="absolute top-4 right-4 z-30 w-10 h-10 rounded-full bg-white/90 hover:bg-white text-cream-900 border-2 border-cream-900 flex items-center justify-center shadow-neo-sm hover:scale-105 active:scale-95 transition-all cursor-pointer"
+            <div 
+              style={{ textShadow: '1.5px 1.5px 2px rgba(0,0,0,0.95)' }}
+              className="absolute inset-0 z-30 pointer-events-none p-4 flex flex-col justify-between font-mono text-[11px] text-white uppercase"
             >
-              <SwitchCamera className="w-5 h-5" />
-            </button>
-
-            {/* Dual Drawer: AR Face Filters & Virtual Backdrops */}
-            {!isActive && (
-              <div className="absolute top-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 z-40 max-w-[92%]">
-                {/* Tab Switcher */}
-                <div className="flex items-center gap-1 bg-black/70 backdrop-blur-md p-1 border border-white/30 rounded-full shadow-lg">
-                  <button
-                    onClick={() => {
-                      playClick();
-                      setDrawerTab('filters');
-                    }}
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-bold uppercase transition-all cursor-pointer ${
-                      drawerTab === 'filters'
-                        ? 'bg-pastelpink-300 text-cream-900 shadow-sm'
-                        : 'text-white/80 hover:text-white'
-                    }`}
-                  >
-                    <Sparkles className="w-3 h-3" />
-                    <span>Face Filters</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      playClick();
-                      setDrawerTab('backdrops');
-                    }}
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-bold uppercase transition-all cursor-pointer ${
-                      drawerTab === 'backdrops'
-                        ? 'bg-emerald-300 text-emerald-950 shadow-sm'
-                        : 'text-white/80 hover:text-white'
-                    }`}
-                  >
-                    <Wand2 className="w-3 h-3" />
-                    <span>Backdrop Studio</span>
-                  </button>
+              <div className="flex justify-between items-start">
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-1 font-bold">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse" />
+                    REC
+                  </div>
+                  <span className="text-[9px] opacity-75 font-semibold">0:02:14</span>
                 </div>
+                
+                <div className="flex items-center gap-2 pointer-events-auto">
+                  <button
+                    onClick={toggleCameraFacing}
+                    title="Switch Camera (Front/Back)"
+                    className="p-1.5 bg-black/60 hover:bg-black/80 border border-white/40 rounded-lg text-white text-xs flex items-center gap-1 shadow-sm backdrop-blur-sm cursor-pointer transition-all active:scale-95"
+                  >
+                    <SwitchCamera className="w-3.5 h-3.5" />
+                    <span className="text-[9px] font-mono">{facingMode === 'user' ? 'Front' : 'Back'}</span>
+                  </button>
 
-                {/* Tab 1: AR Face Filters List */}
-                {drawerTab === 'filters' && (
-                  <div className="flex items-center gap-2 overflow-x-auto p-1.5 bg-black/40 backdrop-blur-md rounded-2xl border border-white/20 scrollbar-none max-w-full">
-                    {[
-                      { id: 'none', label: 'None', icon: '🚫' },
-                      { id: 'aviators', label: 'Retro Shades', icon: '🕶️' },
-                      { id: 'cyber-shades', label: 'Cyber Glasses', icon: '🥽' },
-                      { id: 'beauty-makeup', label: 'Glam Makeup', icon: '💄' },
-                      { id: 'heart-blush', label: 'Heart Blush', icon: '💖' },
-                      { id: 'macbook-hearts', label: 'Float Hearts', icon: '🫧' },
-                      { id: 'tulip', label: 'Flower', icon: '🌷' },
-                      { id: 'noise', label: 'Noise', icon: '📺' },
-                    ].map((filt) => {
-                      const isSelected = filt.id === 'none'
-                        ? activeFilters.length === 0
-                        : activeFilters.includes(filt.id as ARFilter);
+                  <div className="border border-white w-9 h-4 p-0.5 rounded-sm relative flex items-center gap-0.5">
+                    <div className="bg-white h-full w-2.5" />
+                    <div className="bg-white h-full w-2.5" />
+                    <div className="absolute top-1 -right-1.5 w-1 h-2 bg-white rounded-r-sm" />
+                  </div>
+                  <span className="text-[9px] font-bold">85%</span>
+                </div>
+              </div>
 
-                      return (
-                        <button
-                          key={filt.id}
-                          onClick={() => {
-                            playClick();
-                            if (filt.id === 'none') {
-                              setActiveFilters([]);
+              <div className="flex justify-between items-end">
+                <div className="flex flex-col text-[9px] font-semibold opacity-85">
+                  <span>AM 12:45</span>
+                  <span>JUN. 09 2026</span>
+                </div>
+                
+                <div className="flex flex-col text-[9px] items-end font-bold opacity-80">
+                  <span>▲ PLAY</span>
+                  <span>SP</span>
+                </div>
+              </div>
+
+              <div className="absolute inset-0 bg-scanlines pointer-events-none opacity-[0.03]" />
+            </div>
+
+            {/* Snapchat-Style AR Filter Lenses */}
+            {(phase === 'idle' || phase === 'intermission') && !isModelLoading && hasLandmarker && (
+              <div className="absolute bottom-16 left-0 right-0 flex justify-center gap-3 z-50">
+                {[
+                  { id: 'none', label: 'Off', icon: '🚫' },
+                  { id: 'beauty-makeup', label: 'Beauty', icon: '✨' },
+                  { id: 'cyber-shades', label: 'Shades', icon: '🕶️' },
+                  { id: 'aviators', label: 'Aviator', icon: '👓' },
+                  { id: 'heart-blush', label: 'Hearts', icon: '💖' },
+                  { id: 'macbook-hearts', label: 'Float Hearts', icon: '💕' },
+                  { id: 'tulip', label: 'Tulip', icon: '🌸' },
+                  { id: 'noise', label: 'Noise', icon: '📺' },
+                ].map((filt) => {
+                  const isSelected = filt.id === 'none'
+                    ? activeFilters.length === 0
+                    : activeFilters.includes(filt.id as ARFilter);
+
+                  return (
+                    <button
+                      key={filt.id}
+                      onClick={() => {
+                        playClick();
+                        if (filt.id === 'none') {
+                          setActiveFilters([]);
+                        } else {
+                          const targetId = filt.id as ARFilter;
+                          setActiveFilters((prev) => {
+                            if (prev.includes(targetId)) {
+                              return prev.filter((id) => id !== targetId);
                             } else {
-                              const targetId = filt.id as ARFilter;
-                              setActiveFilters((prev) => {
-                                if (prev.includes(targetId)) {
-                                  return prev.filter((id) => id !== targetId);
-                                } else {
-                                  let updated = [...prev];
-                                  if (targetId === 'aviators') updated = updated.filter((id) => id !== 'cyber-shades');
-                                  else if (targetId === 'cyber-shades') updated = updated.filter((id) => id !== 'aviators');
-                                  if (targetId === 'beauty-makeup') updated = updated.filter((id) => id !== 'heart-blush');
-                                  else if (targetId === 'heart-blush') updated = updated.filter((id) => id !== 'beauty-makeup');
-                                  updated.push(targetId);
-                                  return updated;
-                                }
-                              });
+                              let updated = [...prev];
+                              if (targetId === 'aviators') {
+                                updated = updated.filter((id) => id !== 'cyber-shades');
+                              } else if (targetId === 'cyber-shades') {
+                                updated = updated.filter((id) => id !== 'aviators');
+                              }
+                              if (targetId === 'beauty-makeup') {
+                                updated = updated.filter((id) => id !== 'heart-blush');
+                              } else if (targetId === 'heart-blush') {
+                                updated = updated.filter((id) => id !== 'beauty-makeup');
+                              }
+                              updated.push(targetId);
+                              return updated;
                             }
-                          }}
-                          title={filt.label}
-                          className={`w-11 h-11 flex-shrink-0 rounded-full border-2 flex flex-col items-center justify-center text-lg transition-all shadow-neo-sm hover:scale-105 active:scale-95 cursor-pointer ${
-                            isSelected
-                              ? 'bg-pastelpink-300 text-cream-900 border-cream-900 scale-110 shadow-none translate-y-[1px] ring-2 ring-white/60'
-                              : 'bg-cream-50/90 text-cream-800 border-cream-900 hover:bg-pastelpink-50'
-                          }`}
-                        >
-                          <span>{filt.icon}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Tab 2: Virtual Backdrops Studio */}
-                {drawerTab === 'backdrops' && (
-                  <div className="flex items-center gap-2 overflow-x-auto p-1.5 bg-black/40 backdrop-blur-md rounded-2xl border border-white/20 scrollbar-none max-w-full">
-                    {virtualBackdropsList.map((bd) => {
-                      const isSelected = activeBackdrop === bd.id;
-
-                      return (
-                        <button
-                          key={bd.id}
-                          onClick={() => {
-                            playClick();
-                            setActiveBackdrop(bd.id);
-                          }}
-                          title={`${bd.name} - ${bd.description}`}
-                          className={`w-11 h-11 flex-shrink-0 rounded-full border-2 flex flex-col items-center justify-center text-lg transition-all shadow-neo-sm hover:scale-105 active:scale-95 cursor-pointer ${
-                            isSelected
-                              ? 'bg-emerald-300 text-emerald-950 border-emerald-950 scale-110 shadow-none translate-y-[1px] ring-2 ring-white/60'
-                              : 'bg-cream-50/90 text-cream-800 border-cream-900 hover:bg-emerald-50'
-                          }`}
-                        >
-                          <span>{bd.preview}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                          });
+                        }
+                      }}
+                      title={filt.label}
+                      className={`w-12 h-12 flex-shrink-0 rounded-full border-2 flex flex-col items-center justify-center text-xl transition-all shadow-neo-sm hover:scale-105 active:scale-95 cursor-pointer z-50 ${
+                        isSelected
+                          ? 'bg-pastelpink-300 text-cream-900 border-cream-900 scale-110 shadow-none translate-y-[2px] ring-2 ring-white/50'
+                          : 'bg-cream-50/90 text-cream-800 border-cream-900 hover:bg-pastelpink-50'
+                      }`}
+                    >
+                      <span>{filt.icon}</span>
+                    </button>
+                  );
+                })}
               </div>
             )}
 

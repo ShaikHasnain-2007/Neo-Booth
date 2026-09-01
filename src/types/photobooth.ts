@@ -25,25 +25,6 @@ export type LayoutType = 'vertical-4' | 'vertical-3' | 'vertical-2' | 'grid-6' |
 export type FilterType = 'none' | 'grayscale' | 'sepia' | 'high-contrast' | 'vintage' | 'analog-film' | 'custom';
 export type PatternType = 'none' | 'checkerboard' | 'stars' | 'cherries' | 'hologradient';
 export type ARFilter = 'aviators' | 'cyber-shades' | 'beauty-makeup' | 'heart-blush' | 'macbook-hearts' | 'noise' | 'tulip';
-export type VirtualBackdropType = 
-  | 'none' 
-  | 'blur' 
-  | 'y2k-bliss' 
-  | 'cyberpunk-tokyo' 
-  | 'retro-laser' 
-  | 'sakura-blossom' 
-  | 'vaporwave-sunset' 
-  | 'minimal-studio' 
-  | 'purikura-pastel' 
-  | 'eraser-transparent';
-
-export interface VirtualBackdrop {
-  id: VirtualBackdropType;
-  name: string;
-  preview: string;
-  description: string;
-  category: 'natural' | 'retro' | 'studio' | 'anime';
-}
 
 export interface DoodlePoint {
   x: number;
