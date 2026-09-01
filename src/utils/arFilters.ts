@@ -8,16 +8,6 @@ import type {
   CropDimensions 
 } from '../types/photobooth';
 
-// MediaPipe facial landmark connections for procedural drawing
-export const OVAL_INDEXES = [
-  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 
-  400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109
-];
-
-export const LIPS_INDEXES = [
-  61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95, 78
-];
-
 // Pre-generate static noise patterns for fast tiling overlay
 const noiseCanvases: HTMLCanvasElement[] = [];
 
@@ -195,78 +185,6 @@ export function drawCyberShades(
   }
 }
 
-export function drawBeautyMakeup(
-  ctx: CanvasRenderingContext2D,
-  landmarks: PixelLandmark[]
-) {
-  const leftCheek = landmarks[205];
-  const rightCheek = landmarks[425];
-  const nose = landmarks[4];
-  const forehead = landmarks[10];
-
-  let faceSize = 50;
-  if (nose && forehead) {
-    faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.65;
-  }
-
-  // Skin Smoothing
-  if (landmarks[OVAL_INDEXES[0]]) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(landmarks[OVAL_INDEXES[0]].x, landmarks[OVAL_INDEXES[0]].y);
-    for (let i = 1; i < OVAL_INDEXES.length; i++) {
-      const idx = OVAL_INDEXES[i];
-      if (landmarks[idx]) {
-        ctx.lineTo(landmarks[idx].x, landmarks[idx].y);
-      }
-    }
-    ctx.closePath();
-    ctx.clip();
-
-    ctx.globalAlpha = 0.38;
-    ctx.filter = 'blur(4.5px) saturate(102%) brightness(101%)';
-    ctx.drawImage(ctx.canvas, 0, 0);
-    ctx.restore();
-  }
-
-  // Blended Cheek Blush
-  const drawBlendedBlush = (c_x: number, c_y: number, r: number) => {
-    const blushGrad = ctx.createRadialGradient(c_x, c_y, 0, c_x, c_y, r);
-    blushGrad.addColorStop(0, 'rgba(255, 80, 110, 0.11)');
-    blushGrad.addColorStop(0.5, 'rgba(255, 80, 110, 0.03)');
-    blushGrad.addColorStop(1, 'rgba(255, 80, 110, 0)');
-
-    ctx.fillStyle = blushGrad;
-    ctx.beginPath();
-    ctx.arc(c_x, c_y, r, 0, Math.PI * 2);
-    ctx.fill();
-  };
-
-  if (leftCheek) drawBlendedBlush(leftCheek.x, leftCheek.y, faceSize * 0.7);
-  if (rightCheek) drawBlendedBlush(rightCheek.x, rightCheek.y, faceSize * 0.7);
-
-  // Realistic Lip Gloss (Rose-red tint)
-  if (landmarks[LIPS_INDEXES[0]]) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(landmarks[LIPS_INDEXES[0]].x, landmarks[LIPS_INDEXES[0]].y);
-    for (let i = 1; i < LIPS_INDEXES.length; i++) {
-      const idx = LIPS_INDEXES[i];
-      if (landmarks[idx]) {
-        ctx.lineTo(landmarks[idx].x, landmarks[idx].y);
-      }
-    }
-    ctx.closePath();
-
-    ctx.fillStyle = 'rgba(244, 63, 94, 0.14)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(244, 63, 94, 0.2)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.restore();
-  }
-}
-
 export function drawHeartBlush(
   ctx: CanvasRenderingContext2D,
   landmarks: PixelLandmark[]
@@ -362,9 +280,6 @@ export function renderARFilters(
     }
     if (activeFilters.includes('cyber-shades')) {
       drawCyberShades(ctx, landmarks);
-    }
-    if (activeFilters.includes('beauty-makeup')) {
-      drawBeautyMakeup(ctx, landmarks);
     }
     if (activeFilters.includes('heart-blush')) {
       drawHeartBlush(ctx, landmarks);

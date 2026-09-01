@@ -24,7 +24,7 @@ export interface StickerInstance {
 export type LayoutType = 'vertical-4' | 'vertical-3' | 'vertical-2' | 'grid-6' | 'traditional-4';
 export type FilterType = 'none' | 'grayscale' | 'sepia' | 'high-contrast' | 'vintage' | 'analog-film' | 'custom';
 export type PatternType = 'none' | 'checkerboard' | 'stars' | 'cherries' | 'hologradient';
-export type ARFilter = 'aviators' | 'cyber-shades' | 'beauty-makeup' | 'heart-blush' | 'macbook-hearts' | 'noise' | 'tulip';
+export type ARFilter = 'aviators' | 'cyber-shades' | 'heart-blush' | 'macbook-hearts' | 'noise' | 'tulip';
 
 export interface DoodlePoint {
   x: number;

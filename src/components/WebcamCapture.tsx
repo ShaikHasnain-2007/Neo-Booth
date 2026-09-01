@@ -556,7 +556,6 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
               <div className="absolute bottom-16 left-0 right-0 flex justify-center gap-3 z-50">
                 {[
                   { id: 'none', label: 'Off', icon: '🚫' },
-                  { id: 'beauty-makeup', label: 'Beauty', icon: '✨' },
                   { id: 'cyber-shades', label: 'Shades', icon: '🕶️' },
                   { id: 'aviators', label: 'Aviator', icon: '👓' },
                   { id: 'heart-blush', label: 'Hearts', icon: '💖' },
@@ -586,11 +585,6 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
                                 updated = updated.filter((id) => id !== 'cyber-shades');
                               } else if (targetId === 'cyber-shades') {
                                 updated = updated.filter((id) => id !== 'aviators');
-                              }
-                              if (targetId === 'beauty-makeup') {
-                                updated = updated.filter((id) => id !== 'heart-blush');
-                              } else if (targetId === 'heart-blush') {
-                                updated = updated.filter((id) => id !== 'beauty-makeup');
                               }
                               updated.push(targetId);
                               return updated;
