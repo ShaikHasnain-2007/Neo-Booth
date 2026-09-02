@@ -69,6 +69,7 @@ export interface GifExportOptions {
 
 export interface HeartParticle {
   originType?: 'forehead' | 'hand';
+  faceIndex?: number;
   xOffsetFactor: number;
   yOffsetFactor: number;
   speedFactor: number;

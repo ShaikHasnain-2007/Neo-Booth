@@ -31,15 +31,17 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
   
   const landmarkerRef = useRef<FaceLandmarker | null>(null);
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
-  const lastLandmarksRef = useRef<NormalizedLandmark[] | null>(null);
+  const lastLandmarksRef = useRef<NormalizedLandmark[][] | null>(null);
   const lastHandmarksRef = useRef<NormalizedLandmark[][] | null>(null);
   const lastDimensionsRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
+  const lastDetectedFacesCountRef = useRef<number>(0);
 
   const [permissionState, setPermissionState] = useState<'prompt' | 'granted' | 'denied'>('prompt');
   const [errorMessage, setErrorMessage] = useState('');
   const [isModelLoading, setIsModelLoading] = useState(true);
   const [activeFilters, setActiveFilters] = useState<ARFilter[]>([]);
   const [hasLandmarker, setHasLandmarker] = useState(false);
+  const [detectedFacesCount, setDetectedFacesCount] = useState<number>(0);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
 
   const [phase, setPhase] = useState<CapturePhase>('idle');
@@ -92,7 +94,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
             },
             outputFaceBlendshapes: false,
             runningMode: "VIDEO",
-            numFaces: 1
+            numFaces: 4
           }),
           vision.HandLandmarker.createFromOptions(filesetResolver, {
             baseOptions: {
@@ -247,8 +249,24 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
             try {
               const results = landmarker.detectForVideo(video, performance.now());
               if (results.faceLandmarks && results.faceLandmarks.length > 0) {
-                lastLandmarksRef.current = results.faceLandmarks[0];
+                // Sort detected faces left-to-right (Person 1 on left, Person 2 on right)
+                const sortedFaces = [...results.faceLandmarks].sort((faceA, faceB) => {
+                  const centerA = faceA[4]?.x ?? 0;
+                  const centerB = faceB[4]?.x ?? 0;
+                  return centerA - centerB;
+                });
+                lastLandmarksRef.current = sortedFaces;
                 lastDimensionsRef.current = { width: videoW, height: videoH };
+                if (results.faceLandmarks.length !== lastDetectedFacesCountRef.current) {
+                  lastDetectedFacesCountRef.current = results.faceLandmarks.length;
+                  setDetectedFacesCount(results.faceLandmarks.length);
+                }
+              } else {
+                lastLandmarksRef.current = null;
+                if (lastDetectedFacesCountRef.current !== 0) {
+                  lastDetectedFacesCountRef.current = 0;
+                  setDetectedFacesCount(0);
+                }
               }
             } catch (err) {
               console.error("Landmark detection error:", err);
@@ -271,21 +289,21 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
           }
         }
 
-        // Render AR Filters and Hand Gestures
-        const cachedLandmarks = lastLandmarksRef.current;
+        // Render AR Filters and Hand Gestures on ALL detected people
+        const cachedAllFaces = lastLandmarksRef.current;
         const dims = lastDimensionsRef.current;
-        if (dims.width > 0 && dims.height > 0) {
-          const mappedLandmarks: PixelLandmark[] = cachedLandmarks
-            ? cachedLandmarks.map((pt) => {
-                const x_pixel = ((pt.x * dims.width) - sx) / sWidth * targetW;
-                const y_pixel = ((pt.y * dims.height) - sy) / sHeight * targetH;
-                return { x: x_pixel, y: y_pixel, z: pt.z };
-              })
-            : [];
+        if (dims.width > 0 && dims.height > 0 && cachedAllFaces && cachedAllFaces.length > 0) {
+          const mappedAllFaces: PixelLandmark[][] = cachedAllFaces.map((face) =>
+            face.map((pt) => {
+              const x_pixel = ((pt.x * dims.width) - sx) / sWidth * targetW;
+              const y_pixel = ((pt.y * dims.height) - sy) / sHeight * targetH;
+              return { x: x_pixel, y: y_pixel, z: pt.z };
+            })
+          );
           
           renderARFilters(
             ctx,
-            mappedLandmarks,
+            mappedAllFaces,
             activeFilters,
             filterImagesRef.current,
             floatingHeartsRef,
@@ -551,58 +569,66 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
               <div className="absolute inset-0 bg-scanlines pointer-events-none opacity-[0.03]" />
             </div>
 
-            {/* Snapchat-Style AR Filter Lenses */}
+            {/* Snapchat-Style AR Filter Lenses & Multi-Person Duo Glasses Controls */}
             {(phase === 'idle' || phase === 'intermission') && !isModelLoading && hasLandmarker && (
-              <div className="absolute bottom-16 left-0 right-0 flex justify-center gap-3 z-50">
-                {[
-                  { id: 'none', label: 'Off', icon: '🚫' },
-                  { id: 'cyber-shades', label: 'Shades', icon: '🕶️' },
-                  { id: 'aviators', label: 'Aviator', icon: '👓' },
-                  { id: 'heart-blush', label: 'Hearts', icon: '💖' },
-                  { id: 'macbook-hearts', label: 'Float Hearts', icon: '💕' },
-                  { id: 'tulip', label: 'Tulip', icon: '🌸' },
-                  { id: 'noise', label: 'Noise', icon: '📺' },
-                ].map((filt) => {
-                  const isSelected = filt.id === 'none'
-                    ? activeFilters.length === 0
-                    : activeFilters.includes(filt.id as ARFilter);
+              <div className="absolute bottom-16 left-0 right-0 flex flex-col items-center gap-2 z-50">
+                {/* Duo / Group Mode Banner */}
+                {detectedFacesCount >= 2 && (
+                  <div className="bg-cream-900/90 text-pastelpink-300 backdrop-blur-md px-3 py-1 rounded-full text-[11px] font-mono font-bold tracking-wider flex items-center gap-1.5 shadow-neo-sm border border-pastelpink-400/40 animate-pulse">
+                    <span>👥 {detectedFacesCount} People Detected</span>
+                    {activeFilters.includes('cyber-shades') && activeFilters.includes('aviators') ? (
+                      <span className="text-white">✦ Left: 🕶️ Shades • Right: 👓 Aviator</span>
+                    ) : (
+                      <span className="text-cream-300">✦ Group Filter Active</span>
+                    )}
+                  </div>
+                )}
 
-                  return (
-                    <button
-                      key={filt.id}
-                      onClick={() => {
-                        playClick();
-                        if (filt.id === 'none') {
-                          setActiveFilters([]);
-                        } else {
-                          const targetId = filt.id as ARFilter;
-                          setActiveFilters((prev) => {
-                            if (prev.includes(targetId)) {
-                              return prev.filter((id) => id !== targetId);
-                            } else {
-                              let updated = [...prev];
-                              if (targetId === 'aviators') {
-                                updated = updated.filter((id) => id !== 'cyber-shades');
-                              } else if (targetId === 'cyber-shades') {
-                                updated = updated.filter((id) => id !== 'aviators');
+                <div className="flex justify-center gap-3">
+                  {[
+                    { id: 'none', label: 'Off', icon: '🚫' },
+                    { id: 'cyber-shades', label: 'Shades', icon: '🕶️' },
+                    { id: 'aviators', label: 'Aviator', icon: '👓' },
+                    { id: 'heart-blush', label: 'Hearts', icon: '💖' },
+                    { id: 'macbook-hearts', label: 'Float Hearts', icon: '💕' },
+                    { id: 'tulip', label: 'Tulip', icon: '🌸' },
+                    { id: 'noise', label: 'Noise', icon: '📺' },
+                  ].map((filt) => {
+                    const isSelected = filt.id === 'none'
+                      ? activeFilters.length === 0
+                      : activeFilters.includes(filt.id as ARFilter);
+
+                    return (
+                      <button
+                        key={filt.id}
+                        onClick={() => {
+                          playClick();
+                          if (filt.id === 'none') {
+                            setActiveFilters([]);
+                          } else {
+                            const targetId = filt.id as ARFilter;
+                            setActiveFilters((prev) => {
+                              if (prev.includes(targetId)) {
+                                return prev.filter((id) => id !== targetId);
+                              } else {
+                                // Multi-glasses and multi-filter enabled for friends & duos!
+                                return [...prev, targetId];
                               }
-                              updated.push(targetId);
-                              return updated;
-                            }
-                          });
-                        }
-                      }}
-                      title={filt.label}
-                      className={`w-12 h-12 flex-shrink-0 rounded-full border-2 flex flex-col items-center justify-center text-xl transition-all shadow-neo-sm hover:scale-105 active:scale-95 cursor-pointer z-50 ${
-                        isSelected
-                          ? 'bg-pastelpink-300 text-cream-900 border-cream-900 scale-110 shadow-none translate-y-[2px] ring-2 ring-white/50'
-                          : 'bg-cream-50/90 text-cream-800 border-cream-900 hover:bg-pastelpink-50'
-                      }`}
-                    >
-                      <span>{filt.icon}</span>
-                    </button>
-                  );
-                })}
+                            });
+                          }
+                        }}
+                        title={filt.label}
+                        className={`w-12 h-12 flex-shrink-0 rounded-full border-2 flex flex-col items-center justify-center text-xl transition-all shadow-neo-sm hover:scale-105 active:scale-95 cursor-pointer z-50 ${
+                          isSelected
+                            ? 'bg-pastelpink-300 text-cream-900 border-cream-900 scale-110 shadow-none translate-y-[2px] ring-2 ring-white/50'
+                            : 'bg-cream-50/90 text-cream-800 border-cream-900 hover:bg-pastelpink-50'
+                        }`}
+                      >
+                        <span>{filt.icon}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
 

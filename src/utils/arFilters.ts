@@ -263,7 +263,7 @@ export function drawTulip(
 
 export function renderARFilters(
   ctx: CanvasRenderingContext2D,
-  landmarks: PixelLandmark[],
+  allFaces: PixelLandmark[][],
   activeFilters: ARFilter[],
   images: FilterImages,
   floatingHeartsRef: MutableRefObject<HeartParticle[]>,
@@ -274,26 +274,38 @@ export function renderARFilters(
 ) {
   ctx.save();
 
-  if (activeFilters.length > 0 && landmarks.length > 0) {
-    if (activeFilters.includes('aviators')) {
-      drawAviators(ctx, landmarks, images.aviators);
-    }
-    if (activeFilters.includes('cyber-shades')) {
-      drawCyberShades(ctx, landmarks);
-    }
-    if (activeFilters.includes('heart-blush')) {
-      drawHeartBlush(ctx, landmarks);
-    }
-    if (activeFilters.includes('tulip')) {
-      drawTulip(ctx, landmarks, images.tulip);
-    }
+  if (activeFilters.length > 0 && allFaces.length > 0) {
+    const activeGlasses = activeFilters.filter((f) => f === 'aviators' || f === 'cyber-shades');
+
+    // 1. Render glasses on all detected people (split styles if multiple glasses are active)
+    allFaces.forEach((faceLandmarks, faceIdx) => {
+      if (activeGlasses.length === 1) {
+        const style = activeGlasses[0];
+        if (style === 'aviators') drawAviators(ctx, faceLandmarks, images.aviators);
+        if (style === 'cyber-shades') drawCyberShades(ctx, faceLandmarks);
+      } else if (activeGlasses.length >= 2) {
+        // Person 1 (left) gets style 0, Person 2 (right) gets style 1
+        const style = activeGlasses[faceIdx % activeGlasses.length];
+        if (style === 'aviators') drawAviators(ctx, faceLandmarks, images.aviators);
+        if (style === 'cyber-shades') drawCyberShades(ctx, faceLandmarks);
+      }
+
+      // 2. Render all other filters on EVERY detected person
+      if (activeFilters.includes('heart-blush')) {
+        drawHeartBlush(ctx, faceLandmarks);
+      }
+      if (activeFilters.includes('tulip')) {
+        drawTulip(ctx, faceLandmarks, images.tulip);
+      }
+    });
   }
 
   // Floating Hearts Particle System (Forehead loop and Hand gestures)
-  const forehead = landmarks.length > 0 ? landmarks[10] : null;
-  const nose = landmarks.length > 0 ? landmarks[4] : null;
-  const faceSize = forehead && nose
-    ? Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.6
+  const primaryFace = allFaces.length > 0 ? allFaces[0] : null;
+  const primaryForehead = primaryFace ? primaryFace[10] : null;
+  const primaryNose = primaryFace ? primaryFace[4] : null;
+  const defaultFaceSize = primaryForehead && primaryNose
+    ? Math.sqrt(Math.pow(primaryNose.x - primaryForehead.x, 2) + Math.pow(primaryNose.y - primaryForehead.y, 2)) * 0.6
     : 80;
 
   const hearts = floatingHeartsRef.current;
@@ -330,7 +342,7 @@ export function renderARFilters(
   let gestureActive = false;
   let hand_x = 0;
   let hand_y = 0;
-  let handSize = faceSize * 0.8;
+  let handSize = defaultFaceSize * 0.8;
 
   if (rawHandmarks && rawHandmarks.length >= 2) {
     const mapHandPoint = (pt: NormalizedLandmark) => {
@@ -372,25 +384,33 @@ export function renderARFilters(
     }
   }
 
-  // Forehead particles (macbook-hearts filter)
-  if (activeFilters.includes('macbook-hearts') && forehead && nose) {
-    if (floatingHeartsRef.current.filter(p => p.originType !== 'hand').length < 18 && Math.random() < 0.12) {
-      floatingHeartsRef.current.push({
-        originType: 'forehead',
-        xOffsetFactor: (Math.random() - 0.5) * 3.4,
-        yOffsetFactor: -0.4 - Math.random() * 0.25,
-        speedFactor: 0.024 + Math.random() * 0.022,
-        sizeFactor: 0.35 + Math.random() * 0.18,
-        opacity: 1.0,
-        colorHue: 320 + Math.floor(Math.random() * 32),
-        wobbleSpeed: 0.03 + Math.random() * 0.04,
-        wobbleAmount: 0.12 + Math.random() * 0.18,
-        wobblePhase: Math.random() * Math.PI * 2,
-        rotation: (Math.random() - 0.5) * 0.8,
-        rotationSpeed: (Math.random() - 0.5) * 0.03,
-        scale: 0.1
-      });
-    }
+  // Forehead particles (macbook-hearts filter) - spawned on all detected faces
+  if (activeFilters.includes('macbook-hearts') && allFaces.length > 0) {
+    allFaces.forEach((faceLandmarks, faceIdx) => {
+      const forehead = faceLandmarks[10];
+      const nose = faceLandmarks[4];
+      if (forehead && nose) {
+        const faceHearts = floatingHeartsRef.current.filter(p => p.originType !== 'hand' && p.faceIndex === faceIdx);
+        if (faceHearts.length < 14 && Math.random() < 0.12) {
+          floatingHeartsRef.current.push({
+            originType: 'forehead',
+            faceIndex: faceIdx,
+            xOffsetFactor: (Math.random() - 0.5) * 3.4,
+            yOffsetFactor: -0.4 - Math.random() * 0.25,
+            speedFactor: 0.024 + Math.random() * 0.022,
+            sizeFactor: 0.35 + Math.random() * 0.18,
+            opacity: 1.0,
+            colorHue: 320 + Math.floor(Math.random() * 32),
+            wobbleSpeed: 0.03 + Math.random() * 0.04,
+            wobbleAmount: 0.12 + Math.random() * 0.18,
+            wobblePhase: Math.random() * Math.PI * 2,
+            rotation: (Math.random() - 0.5) * 0.8,
+            rotationSpeed: (Math.random() - 0.5) * 0.03,
+            scale: 0.1
+          });
+        }
+      }
+    });
   }
 
   // Hand gesture heart emission
@@ -435,13 +455,18 @@ export function renderARFilters(
       c_x = (p.x || 0) + wobbleX;
       c_y = p.y || 0;
       size = (p.size || 30) * p.scale;
-    } else if (forehead && nose) {
+    } else {
+      const targetFace = (p.faceIndex !== undefined && allFaces[p.faceIndex]) ? allFaces[p.faceIndex] : allFaces[0];
+      if (!targetFace) return;
+      const forehead = targetFace[10];
+      const nose = targetFace[4];
+      if (!forehead || !nose) return;
+
+      const faceSize = Math.sqrt(Math.pow(nose.x - forehead.x, 2) + Math.pow(nose.y - forehead.y, 2)) * 0.6;
       const wobbleX = Math.sin(p.wobblePhase) * p.wobbleAmount;
       c_x = forehead.x + (p.xOffsetFactor + wobbleX) * faceSize;
       c_y = forehead.y + p.yOffsetFactor * faceSize;
       size = p.sizeFactor * faceSize * p.scale;
-    } else {
-      return;
     }
 
     const isWineRed = p.originType === 'hand';
