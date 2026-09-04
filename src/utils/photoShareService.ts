@@ -52,50 +52,43 @@ export function dataUrlToBlob(dataUrl: string): Blob {
 }
 
 export async function uploadPhotoStripToCloud(dataUrl: string, filename: string): Promise<string | null> {
-  let blob: Blob;
   const isGif = dataUrl.startsWith('data:image/gif') || filename.endsWith('.gif');
+  let targetDataUrl = dataUrl;
 
   try {
-    if (isGif) {
-      blob = dataUrlToBlob(dataUrl);
-    } else {
-      const optimizedJpgDataUrl = await convertToHighQualityJpg(dataUrl, 0.98);
-      blob = dataUrlToBlob(optimizedJpgDataUrl);
+    if (!isGif && !dataUrl.startsWith('data:image/jpeg')) {
+      targetDataUrl = await convertToHighQualityJpg(dataUrl, 0.98);
     }
   } catch (err) {
     console.warn('Optimization fallback:', err);
-    try {
-      blob = dataUrlToBlob(dataUrl);
-    } catch {
-      return null;
-    }
+    targetDataUrl = dataUrl;
   }
 
   const cleanFilename = isGif 
     ? (filename.endsWith('.gif') ? filename : filename.replace(/\.[^/.]+$/, '') + '.gif')
     : filename.replace(/\.[^/.]+$/, '') + '.jpg';
 
-  // Provider 1: ntfy.sh (Ultra-fast, CORS: *, returns direct image with 100% byte integrity)
+  // Primary: Native /api/upload endpoint (Vercel Serverless / Vite dev middleware)
   try {
-    const randomTopic = 'neobooth_photo_' + Math.random().toString(36).substring(2, 9);
-
-    const res = await fetch(`https://ntfy.sh/${randomTopic}`, {
-      method: 'PUT',
-      body: blob,
+    const res = await fetch('/api/upload', {
+      method: 'POST',
       headers: {
-        'Filename': cleanFilename,
-        'Title': isGif ? 'NEO.BOOTH Animated GIF' : 'NEO.BOOTH Photo Strip',
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        image: targetDataUrl,
+        filename: cleanFilename,
+      }),
     });
 
     if (res.ok) {
       const data = await res.json();
-      if (data && data.attachment && data.attachment.url) {
-        return data.attachment.url;
+      if (data && data.url && typeof data.url === 'string') {
+        return data.url;
       }
     }
   } catch (err) {
-    console.warn('ntfy.sh upload provider failed:', err);
+    console.warn('/api/upload endpoint failed, falling back to WebRTC P2P:', err);
   }
 
   return null;

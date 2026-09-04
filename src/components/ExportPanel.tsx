@@ -41,16 +41,17 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
   const isMountedRef = useRef(true);
 
   // P2P Direct Device-to-Device WebRTC Session
+  const [peerId, setPeerId] = useState<string>(() => {
+    return 'neo-' + Math.random().toString(36).substring(2, 8) + Date.now().toString(36).slice(-3);
+  });
   const peerRef = useRef<Peer | null>(null);
-  const [peerId, setPeerId] = useState<string>('');
 
   useEffect(() => {
     let active = true;
     let currentPeer: Peer | null = null;
 
     try {
-      const generatedPeerId = 'neo-' + Math.random().toString(36).substring(2, 9);
-      currentPeer = new Peer(generatedPeerId);
+      currentPeer = new Peer(peerId);
       peerRef.current = currentPeer;
 
       currentPeer.on('open', (id) => {
@@ -87,13 +88,14 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
         currentPeer.destroy();
       }
     };
-  }, [activeExportDataUrl, filename, isGif]);
+  }, [activeExportDataUrl, filename, isGif, peerId]);
 
   // Core upload and QR generator function
   const uploadAndGenerateQR = useCallback(async (targetDataUrl: string, targetFilename: string, currentPeerId?: string) => {
     if (!targetDataUrl) return;
 
-    const cacheKey = targetDataUrl + (currentPeerId || '');
+    const activePeer = currentPeerId || peerId;
+    const cacheKey = targetDataUrl + activePeer;
     if (qrCache.has(cacheKey)) {
       const cached = qrCache.get(cacheKey)!;
       if (isMountedRef.current) {
@@ -114,16 +116,16 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
         : window.location.origin;
 
     try {
-      // 1. First generate direct share link using P2P if available
+      // 1. First generate direct share link using P2P and cloud CDN
       const uploadedUrl = await uploadPhotoStripToCloud(targetDataUrl, targetFilename);
 
       let directShareLink = '';
-      if (currentPeerId) {
-        directShareLink = `${baseOrigin}/?peer=${currentPeerId}${uploadedUrl ? '&photo=' + encodeURIComponent(uploadedUrl) : ''}`;
+      if (activePeer && uploadedUrl) {
+        directShareLink = `${baseOrigin}/?peer=${activePeer}&photo=${encodeURIComponent(uploadedUrl)}`;
       } else if (uploadedUrl) {
         directShareLink = `${baseOrigin}/?photo=${encodeURIComponent(uploadedUrl)}`;
       } else {
-        directShareLink = `${baseOrigin}/`;
+        directShareLink = `${baseOrigin}/?peer=${activePeer}`;
       }
 
       const qr = await QRCode.toDataURL(directShareLink, {
@@ -144,11 +146,26 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
       }
     } catch (err) {
       console.warn('QR code generation issue:', err);
-      if (isMountedRef.current) {
-        setUploadStatus('error');
+      // Even if cloud upload fails, generate peer-only QR code so user is never stranded
+      try {
+        const fallbackLink = `${baseOrigin}/?peer=${activePeer}`;
+        const fallbackQr = await QRCode.toDataURL(fallbackLink, {
+          width: 280,
+          margin: 2,
+          color: { dark: '#1b1b19', light: '#ffffff' },
+        });
+        if (isMountedRef.current) {
+          setQrCodeUrl(fallbackQr);
+          setShareablePhotoUrl(fallbackLink);
+          setUploadStatus('ready');
+        }
+      } catch {
+        if (isMountedRef.current) {
+          setUploadStatus('error');
+        }
       }
     }
-  }, []);
+  }, [peerId]);
 
   // Background Pre-Upload: As soon as the active dataUrl is ready, upload in background so the QR is ready immediately
   useEffect(() => {
@@ -176,14 +193,15 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
       }
     }
 
-    const cacheKey = targetUrl + (peerId || '');
+    const activePeer = peerId;
+    const cacheKey = targetUrl + activePeer;
     if (qrCache.has(cacheKey)) {
       const cached = qrCache.get(cacheKey)!;
       setQrCodeUrl(cached.qrCodeUrl);
       setShareablePhotoUrl(cached.shareUrl);
       setUploadStatus('ready');
     } else {
-      void uploadAndGenerateQR(targetUrl, filename, peerId);
+      void uploadAndGenerateQR(targetUrl, filename, activePeer);
     }
   };
 

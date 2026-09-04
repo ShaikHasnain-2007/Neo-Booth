@@ -34,6 +34,17 @@ function App() {
     return params.get('photo') || params.get('file') || params.get('f') || null;
   });
 
+  const [isReceiverMode, setIsReceiverMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    return Boolean(
+      params.get('peer') ||
+      params.get('photo') ||
+      params.get('file') ||
+      params.get('f')
+    );
+  });
+
   // Single-Pose Retake State
   const [retakePoseIndex, setRetakePoseIndex] = useState<number | null>(null);
 
@@ -417,12 +428,13 @@ function App() {
 
   const isTraditionalSelected = options.layout === 'traditional-4';
 
-  // If user opens the website via a mobile photo share link (?photo=...)
-  if (photoUrl) {
+  // If user opens the website via mobile QR scan (?peer=... or ?photo=...)
+  if (isReceiverMode) {
     return (
       <MobileReceiverView 
         photoUrl={photoUrl} 
         onGoToBooth={() => {
+          setIsReceiverMode(false);
           setPhotoUrl(null);
           window.history.replaceState({}, '', window.location.pathname);
           setView('landing');

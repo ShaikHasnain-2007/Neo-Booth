@@ -26,10 +26,11 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
     if (photoUrl) return 'received';
     if (typeof window === 'undefined') return 'loading';
     const params = new URLSearchParams(window.location.search);
+    const queryPhoto = params.get('photo') || params.get('file') || params.get('f');
+    if (queryPhoto && queryPhoto !== 'local') return 'received';
     const peerId = params.get('peer');
     if (peerId) return 'loading';
-    const queryPhoto = params.get('photo') || params.get('file') || params.get('f');
-    return queryPhoto && queryPhoto !== 'local' ? 'received' : 'error';
+    return 'error';
   });
 
   const [downloading, setDownloading] = useState(false);
@@ -46,6 +47,13 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
     let active = true;
     let peerInstance: Peer | null = null;
 
+    // Safety timeout: if P2P takes over 12 seconds and no photo loaded, show fallback error/retry
+    const timeout = setTimeout(() => {
+      if (active && !currentPhoto) {
+        setStatus('error');
+      }
+    }, 12000);
+
     try {
       peerInstance = new Peer();
 
@@ -60,6 +68,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
         conn.on('data', (data: unknown) => {
           if (!active) return;
           if (data && typeof data === 'object' && 'dataUrl' in data && typeof data.dataUrl === 'string') {
+            clearTimeout(timeout);
             setCurrentPhoto(data.dataUrl);
             setIsP2P(true);
             setStatus('received');
@@ -67,7 +76,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
         });
 
         conn.on('error', (err) => {
-          console.warn('P2P connection error, falling back:', err);
+          console.warn('P2P connection error:', err);
         });
       });
 
@@ -80,11 +89,12 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
 
     return () => {
       active = false;
+      clearTimeout(timeout);
       if (peerInstance) {
         peerInstance.destroy();
       }
     };
-  }, []);
+  }, [currentPhoto]);
 
   useEffect(() => {
     if (status === 'received') {
@@ -162,7 +172,11 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
-    } catch (err) {
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        // User closed/dismissed native share sheet
+        return;
+      }
       console.warn('Native save fallback, trying direct link:', err);
       if (currentPhoto) {
         const a = document.createElement('a');
@@ -195,7 +209,10 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
       } else {
         await handleSaveToCameraRoll();
       }
-    } catch (err) {
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        return;
+      }
       console.error('Share failed:', err);
     } finally {
       setDownloading(false);
