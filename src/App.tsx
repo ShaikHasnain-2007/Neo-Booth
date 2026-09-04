@@ -667,39 +667,39 @@ function App() {
               exit={{ opacity: 0, scale: 0.95 }}
               className="w-full flex flex-col items-center gap-4"
             >
-              <div className="flex items-center justify-between w-full max-w-4xl px-2">
-                <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 w-full max-w-4xl px-2">
+                <div className="flex items-center gap-2 md:gap-3">
                   <button
                     onClick={() => {
                       playClick();
                       setView('layout-select');
                     }}
-                    className="px-4 py-2 border-2 border-cream-900 bg-white font-bold text-xs uppercase rounded-xl shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer font-sans"
+                    className="px-3 py-1.5 md:px-4 md:py-2 border-2 border-cream-900 bg-white font-bold text-[11px] md:text-xs uppercase rounded-xl shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer font-sans"
                   >
                     ← Back to Layouts
                   </button>
                   
                   <button
                     onClick={handleToggleSound}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 border-2 border-cream-900 rounded-lg shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all cursor-pointer font-mono text-[10px] font-bold uppercase ${
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-1.5 border-2 border-cream-900 rounded-lg shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all cursor-pointer font-mono text-[10px] font-bold uppercase ${
                       soundEnabled ? 'bg-pastelpink-100 text-cream-900' : 'bg-cream-100 text-cream-500'
                     }`}
                   >
                     {soundEnabled ? (
                       <>
                         <Volume2 className="w-3.5 h-3.5" />
-                        Sound On
+                        <span>Sound On</span>
                       </>
                     ) : (
                       <>
                         <VolumeX className="w-3.5 h-3.5" />
-                        Muted
+                        <span>Muted</span>
                       </>
                     )}
                   </button>
                 </div>
 
-                <span className="font-mono text-xs font-bold uppercase text-cream-500">
+                <span className="font-mono text-[10px] md:text-xs font-bold uppercase text-cream-600 bg-cream-100/90 px-2.5 py-1 rounded-lg border border-cream-300">
                   Step 2: Take Poses ({getPhotoCountForLayout(options.layout)} Poses)
                 </span>
               </div>

@@ -571,10 +571,10 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
 
             {/* Snapchat-Style AR Filter Lenses & Multi-Person Duo Glasses Controls */}
             {(phase === 'idle' || phase === 'intermission') && !isModelLoading && hasLandmarker && (
-              <div className="absolute bottom-16 left-0 right-0 flex flex-col items-center gap-2 z-50">
+              <div className="absolute bottom-14 md:bottom-16 left-0 right-0 flex flex-col items-center gap-1.5 z-50 px-2 pointer-events-none">
                 {/* Duo / Group Mode Banner */}
                 {detectedFacesCount >= 2 && (
-                  <div className="bg-cream-900/90 text-pastelpink-300 backdrop-blur-md px-3 py-1 rounded-full text-[11px] font-mono font-bold tracking-wider flex items-center gap-1.5 shadow-neo-sm border border-pastelpink-400/40 animate-pulse">
+                  <div className="bg-cream-900/90 text-pastelpink-300 backdrop-blur-md px-3 py-1 rounded-full text-[10px] md:text-[11px] font-mono font-bold tracking-wider flex items-center gap-1.5 shadow-neo-sm border border-pastelpink-400/40 animate-pulse text-center pointer-events-auto">
                     <span>👥 {detectedFacesCount} People Detected</span>
                     {activeFilters.includes('cyber-shades') && activeFilters.includes('aviators') ? (
                       <span className="text-white">✦ Left: 🕶️ Shades • Right: 👓 Aviator</span>
@@ -584,7 +584,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
                   </div>
                 )}
 
-                <div className="flex justify-center gap-3">
+                <div className="flex items-center justify-start md:justify-center gap-2 md:gap-3 max-w-full overflow-x-auto px-3 py-1.5 pointer-events-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                   {[
                     { id: 'none', label: 'Off', icon: '🚫' },
                     { id: 'cyber-shades', label: 'Shades', icon: '🕶️' },
@@ -618,7 +618,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
                           }
                         }}
                         title={filt.label}
-                        className={`w-12 h-12 flex-shrink-0 rounded-full border-2 flex flex-col items-center justify-center text-xl transition-all shadow-neo-sm hover:scale-105 active:scale-95 cursor-pointer z-50 ${
+                        className={`w-10 h-10 md:w-12 md:h-12 flex-shrink-0 rounded-full border-2 flex flex-col items-center justify-center text-lg md:text-xl transition-all shadow-neo-sm hover:scale-105 active:scale-95 cursor-pointer z-50 ${
                           isSelected
                             ? 'bg-pastelpink-300 text-cream-900 border-cream-900 scale-110 shadow-none translate-y-[2px] ring-2 ring-white/50'
                             : 'bg-cream-50/90 text-cream-800 border-cream-900 hover:bg-pastelpink-50'
