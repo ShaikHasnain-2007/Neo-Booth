@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Download, Image, Check, Copy, Share2, QrCode, X, Sparkles, CheckCircle2, RefreshCw, ExternalLink, Film } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import QRCode from 'qrcode';
@@ -39,65 +39,76 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
   const filename = `neobooth-${new Date().toISOString().slice(0, 10)}.${options.downloadFormat}`;
   const isMountedRef = useRef(true);
 
+  // Core upload and QR generator function
+  const uploadAndGenerateQR = useCallback(async (targetDataUrl: string, targetFilename: string) => {
+    if (!targetDataUrl) return;
+
+    if (qrCache.has(targetDataUrl)) {
+      const cached = qrCache.get(targetDataUrl)!;
+      if (isMountedRef.current) {
+        setQrCodeUrl(cached.qrCodeUrl);
+        setShareablePhotoUrl(cached.shareUrl);
+        setUploadStatus('ready');
+      }
+      return;
+    }
+
+    if (isMountedRef.current) {
+      setUploadStatus('uploading');
+    }
+
+    const baseOrigin =
+      typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+        ? 'https://neo-booth.vercel.app'
+        : window.location.origin;
+
+    try {
+      const uploadedUrl = await uploadPhotoStripToCloud(targetDataUrl, targetFilename);
+      if (!uploadedUrl) {
+        if (isMountedRef.current) {
+          setUploadStatus('error');
+        }
+        return;
+      }
+
+      const directShareLink = `${baseOrigin}/?photo=${encodeURIComponent(uploadedUrl)}`;
+      const qr = await QRCode.toDataURL(directShareLink, {
+        width: 280,
+        margin: 2,
+        color: {
+          dark: '#1b1b19',
+          light: '#ffffff',
+        },
+      });
+
+      qrCache.set(targetDataUrl, { qrCodeUrl: qr, shareUrl: directShareLink });
+
+      if (isMountedRef.current) {
+        setQrCodeUrl(qr);
+        setShareablePhotoUrl(directShareLink);
+        setUploadStatus('ready');
+      }
+    } catch (err) {
+      console.warn('QR code upload failed:', err);
+      if (isMountedRef.current) {
+        setUploadStatus('error');
+      }
+    }
+  }, []);
+
   // Background Pre-Upload: As soon as the active dataUrl is ready, upload in background so the QR is ready immediately
   useEffect(() => {
     isMountedRef.current = true;
     if (!activeExportDataUrl) return;
 
-    let isCancelled = false;
-
     const timer = setTimeout(() => {
-      // Check if already in cache
-      if (qrCache.has(activeExportDataUrl)) {
-        const cached = qrCache.get(activeExportDataUrl)!;
-        if (isMountedRef.current && !isCancelled) {
-          setQrCodeUrl(cached.qrCodeUrl);
-          setShareablePhotoUrl(cached.shareUrl);
-          setUploadStatus('ready');
-        }
-        return;
-      }
-
-      const preUploadAndGenerateQR = async () => {
-        const baseOrigin =
-          typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-            ? 'https://neo-booth.vercel.app'
-            : window.location.origin;
-
-        try {
-          const uploadedUrl = await uploadPhotoStripToCloud(activeExportDataUrl, filename);
-          if (isCancelled || !uploadedUrl) return;
-
-          const directShareLink = `${baseOrigin}/?photo=${encodeURIComponent(uploadedUrl)}`;
-          const qr = await QRCode.toDataURL(directShareLink, {
-            width: 280,
-            margin: 2,
-            color: {
-              dark: '#1b1b19',
-              light: '#ffffff',
-            },
-          });
-
-          qrCache.set(activeExportDataUrl, { qrCodeUrl: qr, shareUrl: directShareLink });
-
-          if (isMountedRef.current && !isCancelled) {
-            setQrCodeUrl(qr);
-            setShareablePhotoUrl(directShareLink);
-            setUploadStatus('ready');
-          }
-        } catch (err) {
-          console.warn('Background pre-upload skipped:', err);
-        }
-      };
-
-      void preUploadAndGenerateQR();
-    }, 100);
+      void uploadAndGenerateQR(activeExportDataUrl, filename);
+    }, 150);
 
     return () => {
-      isCancelled = true;
       clearTimeout(timer);
     };
-  }, [activeExportDataUrl, filename]);
+  }, [activeExportDataUrl, filename, uploadAndGenerateQR]);
 
   const handleOpenQRModal = async () => {
     setShowQRModal(true);
@@ -106,7 +117,9 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
     if (isGif && !gifDataUrl && onGenerateGif) {
       setUploadStatus('uploading');
       const generated = await onGenerateGif();
-      if (generated) targetUrl = generated;
+      if (generated) {
+        targetUrl = generated;
+      }
     }
 
     if (qrCache.has(targetUrl)) {
@@ -115,7 +128,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
       setShareablePhotoUrl(cached.shareUrl);
       setUploadStatus('ready');
     } else {
-      setUploadStatus('uploading');
+      void uploadAndGenerateQR(targetUrl, filename);
     }
   };
 
