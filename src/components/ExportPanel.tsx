@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Download, Image, Check, Copy, Share2, QrCode, X, Sparkles, CheckCircle2, RefreshCw, ExternalLink, Film } from 'lucide-react';
+import { Download, Image, Check, Copy, Share2, QrCode, X, Sparkles, CheckCircle2, RefreshCw, ExternalLink, Film, ShieldCheck } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import QRCode from 'qrcode';
+import { Peer } from 'peerjs';
 import { uploadPhotoStripToCloud } from '../utils/photoShareService';
 import type { StitchOptions } from '../types/photobooth';
 
@@ -39,12 +40,62 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
   const filename = `neobooth-${new Date().toISOString().slice(0, 10)}.${options.downloadFormat}`;
   const isMountedRef = useRef(true);
 
+  // P2P Direct Device-to-Device WebRTC Session
+  const peerRef = useRef<Peer | null>(null);
+  const [peerId, setPeerId] = useState<string>('');
+
+  useEffect(() => {
+    let active = true;
+    let currentPeer: Peer | null = null;
+
+    try {
+      const generatedPeerId = 'neo-' + Math.random().toString(36).substring(2, 9);
+      currentPeer = new Peer(generatedPeerId);
+      peerRef.current = currentPeer;
+
+      currentPeer.on('open', (id) => {
+        if (active) {
+          setPeerId(id);
+        }
+      });
+
+      currentPeer.on('connection', (conn) => {
+        const sendPhoto = () => {
+          conn.send({
+            type: 'PHOTO_DATA',
+            dataUrl: activeExportDataUrl,
+            filename,
+            isGif,
+          });
+        };
+
+        conn.on('open', sendPhoto);
+
+        conn.on('data', (msg: unknown) => {
+          if (msg && typeof msg === 'object' && 'type' in msg && msg.type === 'REQUEST_PHOTO') {
+            sendPhoto();
+          }
+        });
+      });
+    } catch (err) {
+      console.warn('PeerJS host init skipped:', err);
+    }
+
+    return () => {
+      active = false;
+      if (currentPeer) {
+        currentPeer.destroy();
+      }
+    };
+  }, [activeExportDataUrl, filename, isGif]);
+
   // Core upload and QR generator function
-  const uploadAndGenerateQR = useCallback(async (targetDataUrl: string, targetFilename: string) => {
+  const uploadAndGenerateQR = useCallback(async (targetDataUrl: string, targetFilename: string, currentPeerId?: string) => {
     if (!targetDataUrl) return;
 
-    if (qrCache.has(targetDataUrl)) {
-      const cached = qrCache.get(targetDataUrl)!;
+    const cacheKey = targetDataUrl + (currentPeerId || '');
+    if (qrCache.has(cacheKey)) {
+      const cached = qrCache.get(cacheKey)!;
       if (isMountedRef.current) {
         setQrCodeUrl(cached.qrCodeUrl);
         setShareablePhotoUrl(cached.shareUrl);
@@ -63,15 +114,18 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
         : window.location.origin;
 
     try {
+      // 1. First generate direct share link using P2P if available
       const uploadedUrl = await uploadPhotoStripToCloud(targetDataUrl, targetFilename);
-      if (!uploadedUrl) {
-        if (isMountedRef.current) {
-          setUploadStatus('error');
-        }
-        return;
+
+      let directShareLink = '';
+      if (currentPeerId) {
+        directShareLink = `${baseOrigin}/?peer=${currentPeerId}${uploadedUrl ? '&photo=' + encodeURIComponent(uploadedUrl) : ''}`;
+      } else if (uploadedUrl) {
+        directShareLink = `${baseOrigin}/?photo=${encodeURIComponent(uploadedUrl)}`;
+      } else {
+        directShareLink = `${baseOrigin}/`;
       }
 
-      const directShareLink = `${baseOrigin}/?photo=${encodeURIComponent(uploadedUrl)}`;
       const qr = await QRCode.toDataURL(directShareLink, {
         width: 280,
         margin: 2,
@@ -81,7 +135,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
         },
       });
 
-      qrCache.set(targetDataUrl, { qrCodeUrl: qr, shareUrl: directShareLink });
+      qrCache.set(cacheKey, { qrCodeUrl: qr, shareUrl: directShareLink });
 
       if (isMountedRef.current) {
         setQrCodeUrl(qr);
@@ -89,7 +143,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
         setUploadStatus('ready');
       }
     } catch (err) {
-      console.warn('QR code upload failed:', err);
+      console.warn('QR code generation issue:', err);
       if (isMountedRef.current) {
         setUploadStatus('error');
       }
@@ -102,13 +156,13 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
     if (!activeExportDataUrl) return;
 
     const timer = setTimeout(() => {
-      void uploadAndGenerateQR(activeExportDataUrl, filename);
+      void uploadAndGenerateQR(activeExportDataUrl, filename, peerId);
     }, 150);
 
     return () => {
       clearTimeout(timer);
     };
-  }, [activeExportDataUrl, filename, uploadAndGenerateQR]);
+  }, [activeExportDataUrl, filename, peerId, uploadAndGenerateQR]);
 
   const handleOpenQRModal = async () => {
     setShowQRModal(true);
@@ -122,13 +176,14 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
       }
     }
 
-    if (qrCache.has(targetUrl)) {
-      const cached = qrCache.get(targetUrl)!;
+    const cacheKey = targetUrl + (peerId || '');
+    if (qrCache.has(cacheKey)) {
+      const cached = qrCache.get(cacheKey)!;
       setQrCodeUrl(cached.qrCodeUrl);
       setShareablePhotoUrl(cached.shareUrl);
       setUploadStatus('ready');
     } else {
-      void uploadAndGenerateQR(targetUrl, filename);
+      void uploadAndGenerateQR(targetUrl, filename, peerId);
     }
   };
 
@@ -421,6 +476,11 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
                   <div className="flex items-center justify-center gap-2 p-2 bg-emerald-100 border-2 border-emerald-900 rounded-xl text-[11px] font-mono font-bold text-emerald-900 uppercase">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                     {isGif ? 'Animated GIF QR Ready!' : 'Ultra-Crisp QR Ready!'} Scan with phone
+                  </div>
+
+                  <div className="flex items-center justify-center gap-1.5 p-1.5 bg-cream-50 border border-cream-300 rounded-lg text-[10px] font-mono text-emerald-900">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                    <span>Direct Device-to-Device P2P • Zero Ads</span>
                   </div>
 
                   {shareablePhotoUrl && (

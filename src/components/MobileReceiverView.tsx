@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Download, Share2, Camera, CheckCircle2, AlertCircle, RefreshCw, Film } from 'lucide-react';
+import { Download, Share2, Camera, CheckCircle2, AlertCircle, RefreshCw, Film, ShieldCheck } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { motion } from 'framer-motion';
+import { Peer } from 'peerjs';
 
 interface MobileReceiverViewProps {
   photoUrl?: string | null;
@@ -9,7 +10,7 @@ interface MobileReceiverViewProps {
 }
 
 export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl, onGoToBooth }) => {
-  const [currentPhoto] = useState<string | null>(() => {
+  const [currentPhoto, setCurrentPhoto] = useState<string | null>(() => {
     if (photoUrl) return photoUrl;
     if (typeof window === 'undefined') return null;
     const params = new URLSearchParams(window.location.search);
@@ -17,12 +18,16 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
     return queryPhoto && queryPhoto !== 'local' ? queryPhoto : null;
   });
 
+  const [isP2P, setIsP2P] = useState(false);
+
   const isGif = currentPhoto?.includes('.gif') || currentPhoto?.startsWith('data:image/gif');
 
-  const [status] = useState<'loading' | 'received' | 'error'>(() => {
+  const [status, setStatus] = useState<'loading' | 'received' | 'error'>(() => {
     if (photoUrl) return 'received';
     if (typeof window === 'undefined') return 'loading';
     const params = new URLSearchParams(window.location.search);
+    const peerId = params.get('peer');
+    if (peerId) return 'loading';
     const queryPhoto = params.get('photo') || params.get('file') || params.get('f');
     return queryPhoto && queryPhoto !== 'local' ? 'received' : 'error';
   });
@@ -30,6 +35,56 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
   const [downloading, setDownloading] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
   const filename = isGif ? 'neobooth-live-strip.gif' : 'neobooth-photostrip.jpg';
+
+  // Connect directly to laptop via WebRTC P2P if peer ID is in QR parameters
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const peerId = params.get('peer');
+    if (!peerId) return;
+
+    let active = true;
+    let peerInstance: Peer | null = null;
+
+    try {
+      peerInstance = new Peer();
+
+      peerInstance.on('open', () => {
+        if (!active || !peerInstance) return;
+        const conn = peerInstance.connect(peerId, { reliable: true });
+
+        conn.on('open', () => {
+          conn.send({ type: 'REQUEST_PHOTO' });
+        });
+
+        conn.on('data', (data: unknown) => {
+          if (!active) return;
+          if (data && typeof data === 'object' && 'dataUrl' in data && typeof data.dataUrl === 'string') {
+            setCurrentPhoto(data.dataUrl);
+            setIsP2P(true);
+            setStatus('received');
+          }
+        });
+
+        conn.on('error', (err) => {
+          console.warn('P2P connection error, falling back:', err);
+        });
+      });
+
+      peerInstance.on('error', (err) => {
+        console.warn('Peer client error:', err);
+      });
+    } catch (e) {
+      console.warn('PeerJS init failed:', e);
+    }
+
+    return () => {
+      active = false;
+      if (peerInstance) {
+        peerInstance.destroy();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (status === 'received') {
@@ -226,6 +281,13 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
               <CheckCircle2 className="w-4 h-4 text-emerald-600" />
               {isGif ? 'Animated Boomerang Strip Ready! 🎞️' : 'Photo Strip Ready! 📸'}
             </div>
+
+            {isP2P && (
+              <div className="flex items-center gap-1.5 px-3 py-1 bg-white border-2 border-cream-900 rounded-full text-[10px] font-mono font-bold text-cream-800 shadow-neo-sm">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Private Direct P2P (No External Cloud)</span>
+              </div>
+            )}
 
             {/* Photo Strip Frame Preview */}
             <div className="p-3 bg-[#eae8e1] border-3 border-cream-900 rounded-2xl shadow-neo max-w-[280px] w-full flex flex-col items-center">

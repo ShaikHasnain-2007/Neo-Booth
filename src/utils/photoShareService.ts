@@ -98,24 +98,5 @@ export async function uploadPhotoStripToCloud(dataUrl: string, filename: string)
     console.warn('ntfy.sh upload provider failed:', err);
   }
 
-  // Provider 2: tmpfiles.org
-  try {
-    const form = new FormData();
-    form.append('file', blob, cleanFilename);
-    const res = await fetch('https://tmpfiles.org/api/v1/upload', {
-      method: 'POST',
-      body: form,
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.status === 'success' && data.data?.url) {
-        const rawUrl = data.data.url as string;
-        return rawUrl.replace('tmpfiles.org/', 'tmpfiles.org/dl/');
-      }
-    }
-  } catch (err) {
-    console.warn('tmpfiles fallback skipped:', err);
-  }
-
   return null;
 }
