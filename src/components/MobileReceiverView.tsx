@@ -4,6 +4,8 @@ import confetti from 'canvas-confetti';
 import { motion } from 'framer-motion';
 import { Peer } from 'peerjs';
 
+import { dataUrlToBlob } from '../utils/photoShareService';
+
 interface MobileReceiverViewProps {
   photoUrl?: string | null;
   onGoToBooth: () => void;
@@ -34,6 +36,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
   });
 
   const [downloading, setDownloading] = useState(false);
+  const [downloaded, setDownloaded] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
   const filename = isGif ? 'neobooth-live-strip.gif' : 'neobooth-photostrip.jpg';
 
@@ -111,15 +114,27 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
   const getPristineBlob = async (): Promise<Blob> => {
     if (!currentPhoto) throw new Error('No photo source');
 
-    // For GIFs, directly fetch arrayBuffer to preserve all frames and animation timings
-    if (isGif) {
-      const res = await fetch(currentPhoto);
-      const arrayBuffer = await res.arrayBuffer();
-      return new Blob([arrayBuffer], { type: 'image/gif' });
+    // 1. If it's already a data URL, convert directly
+    if (currentPhoto.startsWith('data:')) {
+      return dataUrlToBlob(currentPhoto);
     }
 
-    // 1. If static image element is loaded in DOM, bake it directly onto canvas
-    if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0) {
+    // 2. Try direct fetch for pristine binary bytes (supports both remote JPG and GIF)
+    try {
+      const res = await fetch(currentPhoto);
+      if (res.ok) {
+        const blob = await res.blob();
+        if (blob && blob.size > 0) {
+          const mime = isGif ? 'image/gif' : 'image/jpeg';
+          return new Blob([blob], { type: mime });
+        }
+      }
+    } catch (e) {
+      console.warn('Direct fetch failed, falling back to canvas bake:', e);
+    }
+
+    // 3. Fallback: bake static image from DOM onto canvas
+    if (!isGif && imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0) {
       const img = imgRef.current;
       const canvas = document.createElement('canvas');
       canvas.width = img.naturalWidth;
@@ -130,59 +145,57 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0);
         const blob = await new Promise<Blob | null>((resolve) => {
-          canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.95);
+          canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.98);
         });
         if (blob && blob.size > 0) return blob;
       }
     }
 
-    // 2. Fetch directly with arrayBuffer fallback
+    // 4. Final arrayBuffer fallback
     const res = await fetch(currentPhoto);
     const arrayBuffer = await res.arrayBuffer();
-    return new Blob([arrayBuffer], { type: 'image/jpeg' });
+    return new Blob([arrayBuffer], { type: isGif ? 'image/gif' : 'image/jpeg' });
   };
 
-  // Mobile Save to Camera Roll / Photos handler
-  const handleSaveToCameraRoll = async () => {
+  // Immediate Mobile Direct Download handler (downloads directly to device storage)
+  const handleDownloadPhoto = async () => {
     if (!currentPhoto || downloading) return;
     setDownloading(true);
 
     try {
       const blob = await getPristineBlob();
       const mimeType = isGif ? 'image/gif' : 'image/jpeg';
-      const file = new File([blob], filename, { type: mimeType });
+      const cleanBlob = new Blob([blob], { type: mimeType });
+      const blobUrl = URL.createObjectURL(cleanBlob);
 
-      // 1. Try native Web Share API (Triggers native iOS/Android "Save Image / Save to Photos")
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          title: isGif ? 'My NEO.BOOTH Animated GIF' : 'My NEO.BOOTH Strip',
-          text: 'Captured on NEO.BOOTH // Y2K Retro Photobooth 📸✨',
-          files: [file],
-        });
-        setDownloading(false);
-        return;
-      }
-
-      // 2. Direct Blob Download Fallback
-      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
       a.download = filename;
+      a.rel = 'noopener';
       document.body.appendChild(a);
       a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        // User closed/dismissed native share sheet
-        return;
-      }
-      console.warn('Native save fallback, trying direct link:', err);
+
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+      }, 10000);
+
+      setDownloaded(true);
+      confetti({
+        particleCount: 80,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ['#FFD6DE', '#CFDEC0', '#5C0617', '#FF3D66', '#A3BE91', '#00FFCC'],
+      });
+      setTimeout(() => setDownloaded(false), 3500);
+    } catch (err) {
+      console.warn('Direct download fallback, trying source link:', err);
       if (currentPhoto) {
         const a = document.createElement('a');
         a.href = currentPhoto;
         a.download = filename;
         a.target = '_blank';
+        a.rel = 'noopener';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -192,6 +205,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
     }
   };
 
+  // Dedicated Native Share Handler (opens Android/iOS share sheet for Instagram/WhatsApp/Stories)
   const handleShareStories = async () => {
     if (!currentPhoto || downloading) return;
     setDownloading(true);
@@ -207,7 +221,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
           files: [file],
         });
       } else {
-        await handleSaveToCameraRoll();
+        await handleDownloadPhoto();
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
@@ -319,26 +333,35 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
                 }}
               />
               <p className="text-[9px] font-mono text-cream-500 uppercase mt-2 text-center">
-                ✦ Tip: Press and hold image to save to Photos ✦
+                ✦ Tip: Press and hold image to save directly to Gallery / Photos ✦
               </p>
             </div>
 
             {/* Action Buttons */}
             <div className="w-full flex flex-col gap-2.5">
               <button
-                onClick={handleSaveToCameraRoll}
+                onClick={handleDownloadPhoto}
                 disabled={downloading}
-                className="flex items-center justify-center gap-2.5 w-full py-3.5 bg-cream-900 text-white border-2 border-cream-900 rounded-xl font-bold uppercase text-sm shadow-neo hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-neo-sm active:translate-x-[2px] active:translate-y-[2px] cursor-pointer text-center disabled:opacity-70"
+                className={`flex items-center justify-center gap-2.5 w-full py-3.5 border-2 border-cream-900 rounded-xl font-bold uppercase text-sm shadow-neo hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-neo-sm active:translate-x-[2px] active:translate-y-[2px] cursor-pointer text-center transition-all disabled:opacity-70 ${
+                  downloaded
+                    ? 'bg-emerald-700 text-white border-emerald-900'
+                    : 'bg-cream-900 text-white hover:bg-cream-800'
+                }`}
               >
                 {downloading ? (
                   <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Saving...
+                    <RefreshCw className="w-4 h-4 animate-spin text-pastelpink-300" />
+                    Downloading to Mobile...
+                  </>
+                ) : downloaded ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                    Downloaded to Device!
                   </>
                 ) : (
                   <>
                     <Download className="w-4 h-4" />
-                    Save {isGif ? 'Animated GIF' : 'Photo'} to Photos
+                    Download {isGif ? 'Animated GIF' : 'Photo'} to Device
                   </>
                 )}
               </button>
@@ -347,10 +370,10 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
                 <button
                   onClick={handleShareStories}
                   disabled={downloading}
-                  className="flex items-center justify-center gap-2 w-full py-3 bg-pastelpink-200 text-cream-900 border-2 border-cream-900 rounded-xl font-bold uppercase text-xs shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none cursor-pointer disabled:opacity-70"
+                  className="flex items-center justify-center gap-2 w-full py-3 bg-pastelpink-200 hover:bg-pastelpink-300 text-cream-900 border-2 border-cream-900 rounded-xl font-bold uppercase text-xs shadow-neo-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none cursor-pointer disabled:opacity-70 transition-all"
                 >
                   <Share2 className="w-4 h-4" />
-                  Share to Instagram / Stories
+                  Share to Instagram / Stories / Apps
                 </button>
               )}
 
