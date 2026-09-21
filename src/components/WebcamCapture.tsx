@@ -185,6 +185,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
       stopWebcam();
       if (timerRef.current) clearTimeout(timerRef.current);
       if (intervalRef.current) clearInterval(intervalRef.current);
+      if (burstIntervalRef.current) clearInterval(burstIntervalRef.current);
     };
   }, [facingMode, startWebcam, stopWebcam]);
 

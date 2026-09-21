@@ -15,7 +15,7 @@ const getAudioContext = (): AudioContext => {
     }
   }
   if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
+    void audioCtx.resume().catch(() => {});
   }
   return audioCtx;
 };

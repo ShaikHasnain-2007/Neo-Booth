@@ -605,8 +605,12 @@ export async function renderStitchedCanvas(
       hour12: true
     });
 
+    const filmNoSeed = loadedImages[0]?.src
+      ? Math.abs(loadedImages[0].src.slice(-40).split('').reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) | 0, 7)) % 90000 + 10000
+      : 48291;
+
     const fullStamp = isTraditional 
-      ? `Film No. ${Math.floor(Math.random() * 90000) + 10000}  |  ${dateText}  |  ${timeStr}`
+      ? `Film No. ${filmNoSeed}  |  ${dateText}  |  ${timeStr}`
       : `${dateText}  |  ${timeStr}`;
 
     ctx.save();
