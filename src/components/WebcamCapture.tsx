@@ -12,6 +12,16 @@ import type {
   FilterImages 
 } from '../types/photobooth';
 
+const FILTER_OPTIONS: { id: ARFilter | 'none'; label: string; icon: string }[] = [
+  { id: 'none', label: 'Off', icon: '🚫' },
+  { id: 'cyber-shades', label: 'Shades', icon: '🕶️' },
+  { id: 'aviators', label: 'Aviator', icon: '👓' },
+  { id: 'heart-blush', label: 'Hearts', icon: '💖' },
+  { id: 'macbook-hearts', label: 'Float Hearts', icon: '💕' },
+  { id: 'tulip', label: 'Tulip', icon: '🌸' },
+  { id: 'noise', label: 'Noise', icon: '📺' },
+];
+
 interface WebcamCaptureProps {
   onCaptureComplete: (photos: string[], poseBursts?: string[][]) => void;
   photoCount: number;
@@ -449,12 +459,29 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
     runCountdownStep(0);
   }, [phase, runCountdownStep]);
 
-  // Spacebar shortcut to start photoshoot
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && phase === 'idle' && permissionState === 'granted') {
+      if (phase !== 'idle' || permissionState !== 'granted') return;
+
+      if (e.code === 'Space') {
         e.preventDefault();
         startPhotoSession();
+      } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+        e.preventDefault();
+        playClick();
+        setActiveFilters(prev => {
+          // If multiple filters are active, start cycling from the last one, or from 'none'
+          const currentId = prev.length > 0 ? prev[prev.length - 1] : 'none';
+          const currentIndex = FILTER_OPTIONS.findIndex(f => f.id === currentId);
+          let nextIndex = e.code === 'ArrowRight' ? currentIndex + 1 : currentIndex - 1;
+          
+          if (nextIndex >= FILTER_OPTIONS.length) nextIndex = 0;
+          if (nextIndex < 0) nextIndex = FILTER_OPTIONS.length - 1;
+          
+          const nextFilter = FILTER_OPTIONS[nextIndex].id;
+          return nextFilter === 'none' ? [] : [nextFilter as ARFilter];
+        });
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -586,15 +613,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
                 )}
 
                 <div className="flex items-center justify-start md:justify-center gap-2 md:gap-3 max-w-full overflow-x-auto px-3 py-1.5 pointer-events-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                  {[
-                    { id: 'none', label: 'Off', icon: '🚫' },
-                    { id: 'cyber-shades', label: 'Shades', icon: '🕶️' },
-                    { id: 'aviators', label: 'Aviator', icon: '👓' },
-                    { id: 'heart-blush', label: 'Hearts', icon: '💖' },
-                    { id: 'macbook-hearts', label: 'Float Hearts', icon: '💕' },
-                    { id: 'tulip', label: 'Tulip', icon: '🌸' },
-                    { id: 'noise', label: 'Noise', icon: '📺' },
-                  ].map((filt) => {
+                  {FILTER_OPTIONS.map((filt) => {
                     const isSelected = filt.id === 'none'
                       ? activeFilters.length === 0
                       : activeFilters.includes(filt.id as ARFilter);

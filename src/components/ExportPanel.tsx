@@ -181,6 +181,41 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
     };
   }, [activeExportDataUrl, filename, peerId, uploadAndGenerateQR]);
 
+  // Keyboard shortcut for downloading
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Enter' && !showQRModal && !isGeneratingGif) {
+        e.preventDefault();
+        
+        if (isGif && !gifDataUrl && onGenerateGif) {
+          void (async () => {
+            const generated = await onGenerateGif();
+            if (generated) {
+              triggerConfetti();
+              const a = document.createElement('a');
+              a.href = generated;
+              a.download = filename;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+            }
+          })();
+        } else if (activeExportDataUrl) {
+          triggerConfetti();
+          const a = document.createElement('a');
+          a.href = activeExportDataUrl;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showQRModal, isGeneratingGif, isGif, gifDataUrl, onGenerateGif, activeExportDataUrl, filename]);
+
   const handleOpenQRModal = async () => {
     setShowQRModal(true);
 
