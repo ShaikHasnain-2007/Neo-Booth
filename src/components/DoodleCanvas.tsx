@@ -36,7 +36,7 @@ export const DoodleCanvas: React.FC<DoodleCanvasProps> = ({
     ctx.clearRect(0, 0, width, height);
 
     for (const stroke of doodles) {
-      if (!stroke.points || stroke.points.length < 2) continue;
+      if (!stroke.points || stroke.points.length === 0) continue;
 
       ctx.save();
       ctx.beginPath();
@@ -51,15 +51,21 @@ export const DoodleCanvas: React.FC<DoodleCanvasProps> = ({
         ctx.shadowBlur = stroke.size * 1.6;
       }
 
-      const first = stroke.points[0];
-      ctx.moveTo((first.x / 100) * width, (first.y / 100) * height);
+      if (stroke.points.length === 1) {
+        ctx.fillStyle = stroke.color;
+        ctx.arc((stroke.points[0].x / 100) * width, (stroke.points[0].y / 100) * height, stroke.size / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        const first = stroke.points[0];
+        ctx.moveTo((first.x / 100) * width, (first.y / 100) * height);
 
-      for (let i = 1; i < stroke.points.length; i++) {
-        const pt = stroke.points[i];
-        ctx.lineTo((pt.x / 100) * width, (pt.y / 100) * height);
+        for (let i = 1; i < stroke.points.length; i++) {
+          const pt = stroke.points[i];
+          ctx.lineTo((pt.x / 100) * width, (pt.y / 100) * height);
+        }
+
+        ctx.stroke();
       }
-
-      ctx.stroke();
       ctx.restore();
     }
   }, [doodles, width, height]);
@@ -85,6 +91,23 @@ export const DoodleCanvas: React.FC<DoodleCanvasProps> = ({
     const pt = getCanvasCoords(e.clientX, e.clientY);
     if (pt) {
       currentPointsRef.current = [pt];
+      // Live draw the initial point for instant responsiveness
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.fillStyle = currentColor;
+          if (glowEnabled) {
+            ctx.shadowColor = currentColor;
+            ctx.shadowBlur = currentSize * 1.6;
+          }
+          ctx.arc((pt.x / 100) * width, (pt.y / 100) * height, currentSize / 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
     }
   };
 
@@ -136,7 +159,7 @@ export const DoodleCanvas: React.FC<DoodleCanvasProps> = ({
       // ignore
     }
 
-    if (currentPointsRef.current.length > 1) {
+    if (currentPointsRef.current.length >= 1) {
       const newDoodle: DoodlePath = {
         id: `doodle-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         points: [...currentPointsRef.current],

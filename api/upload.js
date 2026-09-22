@@ -53,8 +53,9 @@ export default async function handler(req, res) {
     }
 
     const data = await upstream.json();
-    if (data && data.data && data.data.url) {
-      res.status(200).json({ success: true, url: data.data.url });
+    const directUrl = data?.data?.url || data?.data?.display_url || data?.data?.image?.url;
+    if (directUrl) {
+      res.status(200).json({ success: true, url: directUrl });
     } else {
       res.status(500).json({ error: 'Failed to extract URL', response: data });
     }

@@ -286,8 +286,10 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
     if (!shareablePhotoUrl) return;
     try {
       await navigator.clipboard.writeText(shareablePhotoUrl);
-      setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 2000);
+      if (isMountedRef.current) setLinkCopied(true);
+      setTimeout(() => {
+        if (isMountedRef.current) setLinkCopied(false);
+      }, 2000);
     } catch (err) {
       console.error('Failed to copy link:', err);
     }
@@ -318,15 +320,19 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
       await navigator.clipboard.write([
         new ClipboardItem({ 'image/png': clipboardBlob }),
       ]);
-      setCopied(true);
+      if (isMountedRef.current) setCopied(true);
       triggerConfetti();
-      setTimeout(() => setCopied(false), 2500);
+      setTimeout(() => {
+        if (isMountedRef.current) setCopied(false);
+      }, 2500);
     } catch (err) {
       console.error('Failed to copy image to clipboard:', err);
       try {
         await navigator.clipboard.writeText(window.location.href);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        if (isMountedRef.current) setCopied(true);
+        setTimeout(() => {
+          if (isMountedRef.current) setCopied(false);
+        }, 2000);
       } catch (fallbackErr) {
         console.error('Clipboard fallback failed:', fallbackErr);
       }

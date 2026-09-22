@@ -105,6 +105,7 @@ function App() {
 
   // Fast debounced canvas stitching pipeline with image caching
   useEffect(() => {
+    let active = true;
     const neededPhotos = getPhotoCountForLayout(options.layout);
     if (photos.length === neededPhotos) {
       const generateStrip = async () => {
@@ -114,16 +115,23 @@ function App() {
             stickers,
             doodles,
           });
-          setStitchedPhoto(result);
-          // Invalidate cached GIF when options, stickers, or doodles change
-          setGifDataUrl(null);
+          if (active) {
+            setStitchedPhoto(result);
+            // Invalidate cached GIF when options, stickers, or doodles change
+            setGifDataUrl(null);
+          }
         } catch (err) {
-          console.error('Failed to stitch photos:', err);
+          if (active) {
+            console.error('Failed to stitch photos:', err);
+          }
         }
       };
 
       const timer = setTimeout(generateStrip, 40);
-      return () => clearTimeout(timer);
+      return () => {
+        active = false;
+        clearTimeout(timer);
+      };
     }
   }, [photos, options, stickers, doodles]);
 
@@ -830,6 +838,7 @@ function App() {
                               cursor: doodleActive ? 'default' : 'grab',
                               zIndex: isSelected ? 40 : 20,
                               pointerEvents: doodleActive ? 'none' : 'auto',
+                              touchAction: 'none',
                             }}
                             onMouseDown={(e) => handleStickerMouseDown(e, sticker.id)}
                             onTouchStart={(e) => handleStickerTouchStart(e, sticker.id)}

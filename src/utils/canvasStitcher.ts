@@ -416,7 +416,7 @@ const drawDoodles = (
 
   ctx.save();
   for (const stroke of doodles) {
-    if (!stroke.points || stroke.points.length < 2) continue;
+    if (!stroke.points || stroke.points.length === 0) continue;
 
     ctx.save();
     ctx.beginPath();
@@ -432,15 +432,21 @@ const drawDoodles = (
       ctx.shadowBlur = strokeWidth * 2;
     }
 
-    const firstPt = stroke.points[0];
-    ctx.moveTo((firstPt.x / 100) * w, (firstPt.y / 100) * h);
+    if (stroke.points.length === 1) {
+      ctx.fillStyle = stroke.color;
+      ctx.arc((stroke.points[0].x / 100) * w, (stroke.points[0].y / 100) * h, strokeWidth / 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      const firstPt = stroke.points[0];
+      ctx.moveTo((firstPt.x / 100) * w, (firstPt.y / 100) * h);
 
-    for (let i = 1; i < stroke.points.length; i++) {
-      const pt = stroke.points[i];
-      ctx.lineTo((pt.x / 100) * w, (pt.y / 100) * h);
+      for (let i = 1; i < stroke.points.length; i++) {
+        const pt = stroke.points[i];
+        ctx.lineTo((pt.x / 100) * w, (pt.y / 100) * h);
+      }
+
+      ctx.stroke();
     }
-
-    ctx.stroke();
     ctx.restore();
   }
   ctx.restore();

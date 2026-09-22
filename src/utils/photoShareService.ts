@@ -4,7 +4,7 @@
 
 // Convert dataURL to Ultra-High-Quality (98%) JPEG for crisp high-resolution photo strips and fast mobile delivery
 export async function convertToHighQualityJpg(dataUrl: string, quality = 0.98): Promise<string> {
-  if (dataUrl.startsWith('data:image/jpeg') || dataUrl.startsWith('data:image/gif')) {
+  if (!dataUrl || dataUrl.startsWith('data:image/jpeg') || dataUrl.startsWith('data:image/gif')) {
     return dataUrl;
   }
   return new Promise((resolve) => {

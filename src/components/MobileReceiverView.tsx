@@ -39,6 +39,14 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
   const [downloaded, setDownloaded] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
   const filename = isGif ? 'neobooth-live-strip.gif' : 'neobooth-photostrip.jpg';
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Connect directly to laptop via WebRTC P2P if peer ID is in QR parameters
   useEffect(() => {
@@ -180,14 +188,16 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
         URL.revokeObjectURL(blobUrl);
       }, 10000);
 
-      setDownloaded(true);
+      if (isMountedRef.current) setDownloaded(true);
       confetti({
         particleCount: 80,
         spread: 70,
         origin: { y: 0.6 },
         colors: ['#FFD6DE', '#CFDEC0', '#5C0617', '#FF3D66', '#A3BE91', '#00FFCC'],
       });
-      setTimeout(() => setDownloaded(false), 3500);
+      setTimeout(() => {
+        if (isMountedRef.current) setDownloaded(false);
+      }, 3500);
     } catch (err) {
       console.warn('Direct download fallback, trying source link:', err);
       if (currentPhoto) {
@@ -201,7 +211,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
         document.body.removeChild(a);
       }
     } finally {
-      setDownloading(false);
+      if (isMountedRef.current) setDownloading(false);
     }
   };
 
@@ -229,7 +239,7 @@ export const MobileReceiverView: React.FC<MobileReceiverViewProps> = ({ photoUrl
       }
       console.error('Share failed:', err);
     } finally {
-      setDownloading(false);
+      if (isMountedRef.current) setDownloading(false);
     }
   };
 
