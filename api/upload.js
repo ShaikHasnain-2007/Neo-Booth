@@ -36,12 +36,12 @@ export default async function handler(req, res) {
     const blob = new Blob([buffer], { type: mimeType });
 
     const form = new FormData();
-    form.append('key', '6d207e02198a847aa98d0a2a901485a5');
-    form.append('action', 'upload');
-    form.append('format', 'json');
-    form.append('source', blob, filename || 'neobooth-strip.jpg');
+    // Use ImgBB for clean, ad-free image hosting without redirects
+    form.append('key', '32700e1215b22bbf58514eb5e76ccf31'); 
+    form.append('image', matches[2]); // ImgBB accepts base64 directly
+    form.append('name', filename || 'neobooth-strip');
 
-    const upstream = await fetch('https://freeimage.host/api/1/upload', {
+    const upstream = await fetch('https://api.imgbb.com/1/upload', {
       method: 'POST',
       body: form,
     });
@@ -53,8 +53,8 @@ export default async function handler(req, res) {
     }
 
     const data = await upstream.json();
-    if (data && data.image && data.image.url) {
-      res.status(200).json({ success: true, url: data.image.url });
+    if (data && data.data && data.data.url) {
+      res.status(200).json({ success: true, url: data.data.url });
     } else {
       res.status(500).json({ error: 'Failed to extract URL', response: data });
     }

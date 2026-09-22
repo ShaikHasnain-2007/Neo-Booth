@@ -177,6 +177,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
     }, 150);
 
     return () => {
+      isMountedRef.current = false;
       clearTimeout(timer);
     };
   }, [activeExportDataUrl, filename, peerId, uploadAndGenerateQR]);
