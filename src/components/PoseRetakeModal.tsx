@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Camera, X, RefreshCw, SwitchCamera, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { playBeep, playShutter, playClick } from '../utils/audioEngine';
+import { renderARFilters, getNoiseCanvases } from '../utils/arFilters';
+import type { FaceLandmarker, HandLandmarker } from '@mediapipe/tasks-vision';
+import type { ARFilter, NormalizedLandmark, PixelLandmark, HeartParticle, FilterImages } from '../types/photobooth';
 
 interface PoseRetakeModalProps {
   poseIndex: number;
@@ -20,15 +23,88 @@ export const PoseRetakeModal: React.FC<PoseRetakeModalProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  const landmarkerRef = useRef<FaceLandmarker | null>(null);
+  const handLandmarkerRef = useRef<HandLandmarker | null>(null);
+  const lastLandmarksRef = useRef<NormalizedLandmark[][] | null>(null);
+  const lastHandmarksRef = useRef<NormalizedLandmark[][] | null>(null);
+  const lastDimensionsRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
+  const lastDetectedFacesCountRef = useRef<number>(0);
+  const floatingHeartsRef = useRef<HeartParticle[]>([]);
+  const lastHandHeartSpawnTimeRef = useRef<number>(0);
+  const filterImagesRef = useRef<FilterImages>({ aviators: null, tulip: null });
+
   const [permissionState, setPermissionState] = useState<'prompt' | 'granted' | 'denied'>('prompt');
   const [errorMessage, setErrorMessage] = useState('');
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showFlash, setShowFlash] = useState(false);
+  const [activeFilters, setActiveFilters] = useState<ARFilter[]>([]);
+  const [hasLandmarker, setHasLandmarker] = useState(false);
+  const [isModelLoading, setIsModelLoading] = useState(true);
+  const [detectedFacesCount, setDetectedFacesCount] = useState<number>(0);
+
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const burstIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const retakeBurstRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    const img1 = new Image();
+    img1.src = '/filters/aviators.svg';
+    filterImagesRef.current.aviators = img1;
+
+    const img2 = new Image();
+    img2.src = '/filters/tulip.png';
+    filterImagesRef.current.tulip = img2;
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function loadMediaPipe() {
+      try {
+        const vision = await import('@mediapipe/tasks-vision');
+        const filesetResolver = await vision.FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm"
+        );
+        
+        const [faceLandmarker, handLandmarker] = await Promise.all([
+          vision.FaceLandmarker.createFromOptions(filesetResolver, {
+            baseOptions: {
+              modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+              delegate: "GPU"
+            },
+            outputFaceBlendshapes: false,
+            runningMode: "VIDEO",
+            numFaces: 4
+          }),
+          vision.HandLandmarker.createFromOptions(filesetResolver, {
+            baseOptions: {
+              modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+              delegate: "GPU"
+            },
+            runningMode: "VIDEO",
+            numHands: 2
+          })
+        ]);
+
+        if (active) {
+          landmarkerRef.current = faceLandmarker;
+          handLandmarkerRef.current = handLandmarker;
+          setHasLandmarker(true);
+          setIsModelLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to load MediaPipe models:", err);
+        if (active) setIsModelLoading(false);
+      }
+    }
+    loadMediaPipe();
+    return () => {
+      active = false;
+      if (landmarkerRef.current) landmarkerRef.current.close();
+      if (handLandmarkerRef.current) handLandmarkerRef.current.close();
+    };
+  }, []);
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -85,36 +161,146 @@ export const PoseRetakeModal: React.FC<PoseRetakeModalProps> = ({
     }
   }, [permissionState]);
 
-  const capturePhoto = (): string | null => {
+  useEffect(() => {
+    let animationId: number;
     const video = videoRef.current;
-    if (!video || video.readyState < 2) return null;
+    const canvas = canvasRef.current;
 
-    const canvas = document.createElement('canvas');
-    canvas.width = 800;
-    canvas.height = 600;
+    if (!video || !canvas) return;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
+    if (!ctx) return;
 
-    const videoW = video.videoWidth || 800;
-    const videoH = video.videoHeight || 600;
+    let lastVideoTime = -1;
 
-    const videoAspectRatio = videoW / videoH;
-    const targetAspectRatio = 800 / 600;
+    const renderLoop = () => {
+      const videoW = video.videoWidth || 0;
+      const videoH = video.videoHeight || 0;
 
-    let sWidth = videoW;
-    let sHeight = videoH;
-    let sx = 0;
-    let sy = 0;
+      if (video.readyState >= 2 && videoW > 0 && videoH > 0) {
+        const targetW = 800;
+        const targetH = 600;
 
-    if (videoAspectRatio > targetAspectRatio) {
-      sWidth = videoH * targetAspectRatio;
-      sx = (videoW - sWidth) / 2;
-    } else {
-      sHeight = videoW / targetAspectRatio;
-      sy = (videoH - sHeight) / 2;
-    }
+        ctx.clearRect(0, 0, targetW, targetH);
 
-    ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, 800, 600);
+        const videoAspectRatio = videoW / videoH;
+        const targetAspectRatio = targetW / targetH;
+
+        let sWidth = videoW;
+        let sHeight = videoH;
+        let sx = 0;
+        let sy = 0;
+
+        if (videoAspectRatio > targetAspectRatio) {
+          sWidth = videoH * targetAspectRatio;
+          sx = (videoW - sWidth) / 2;
+        } else {
+          sHeight = videoW / targetAspectRatio;
+          sy = (videoH - sHeight) / 2;
+        }
+
+        ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
+
+        const landmarker = landmarkerRef.current;
+        const handLandmarker = handLandmarkerRef.current;
+        if (video.currentTime !== lastVideoTime) {
+          lastVideoTime = video.currentTime;
+          
+          if (landmarker) {
+            try {
+              const results = landmarker.detectForVideo(video, performance.now());
+              if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+                const sortedFaces = [...results.faceLandmarks].sort((faceA, faceB) => {
+                  const centerA = faceA[4]?.x ?? 0;
+                  const centerB = faceB[4]?.x ?? 0;
+                  return centerA - centerB;
+                });
+                lastLandmarksRef.current = sortedFaces;
+                lastDimensionsRef.current = { width: videoW, height: videoH };
+                if (results.faceLandmarks.length !== lastDetectedFacesCountRef.current) {
+                  lastDetectedFacesCountRef.current = results.faceLandmarks.length;
+                  setDetectedFacesCount(results.faceLandmarks.length);
+                }
+              } else {
+                lastLandmarksRef.current = null;
+                if (lastDetectedFacesCountRef.current !== 0) {
+                  lastDetectedFacesCountRef.current = 0;
+                  setDetectedFacesCount(0);
+                }
+              }
+            } catch (err) {
+              console.error(err);
+            }
+          }
+
+          if (handLandmarker) {
+            try {
+              const handResults = handLandmarker.detectForVideo(video, performance.now());
+              if (handResults.landmarks && handResults.landmarks.length > 0) {
+                lastHandmarksRef.current = handResults.landmarks;
+              } else {
+                lastHandmarksRef.current = null;
+              }
+            } catch (err) {
+              console.error(err);
+            }
+          } else {
+            lastHandmarksRef.current = null;
+          }
+        }
+
+        const cachedAllFaces = lastLandmarksRef.current;
+        const dims = lastDimensionsRef.current;
+        if (dims.width > 0 && dims.height > 0 && cachedAllFaces && cachedAllFaces.length > 0) {
+          const mappedAllFaces: PixelLandmark[][] = cachedAllFaces.map((face) =>
+            face.map((pt) => {
+              const x_pixel = ((pt.x * dims.width) - sx) / sWidth * targetW;
+              const y_pixel = ((pt.y * dims.height) - sy) / sHeight * targetH;
+              return { x: x_pixel, y: y_pixel, z: pt.z };
+            })
+          );
+          
+          renderARFilters(
+            ctx,
+            mappedAllFaces,
+            activeFilters,
+            filterImagesRef.current,
+            floatingHeartsRef,
+            lastHandHeartSpawnTimeRef,
+            lastHandmarksRef.current,
+            dims,
+            { sx, sy, sWidth, sHeight, targetW, targetH }
+          );
+        }
+
+        if (activeFilters.includes('noise')) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'source-over';
+          const canvases = getNoiseCanvases();
+          if (canvases.length > 0) {
+            const noiseCanvas = canvases[Math.floor(Math.random() * canvases.length)];
+            const pattern = ctx.createPattern(noiseCanvas, 'repeat');
+            if (pattern) {
+              ctx.fillStyle = pattern;
+              ctx.fillRect(0, 0, targetW, targetH);
+            }
+          }
+          ctx.restore();
+        }
+      }
+
+      animationId = requestAnimationFrame(renderLoop);
+    };
+
+    renderLoop();
+
+    return () => {
+      cancelAnimationFrame(animationId);
+    };
+  }, [activeFilters, hasLandmarker, permissionState]);
+
+  const capturePhoto = (): string | null => {
+    const canvas = canvasRef.current;
+    if (!canvas || !streamRef.current) return null;
     return canvas.toDataURL('image/png');
   };
 
@@ -213,13 +399,20 @@ export const PoseRetakeModal: React.FC<PoseRetakeModalProps> = ({
             </div>
           )}
 
+          {permissionState === 'granted' && isModelLoading && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 text-white z-40 backdrop-blur-sm">
+              <RefreshCw className="w-8 h-8 mb-2 animate-spin text-pastelpink-400" />
+              <p className="text-xs font-bold uppercase">Loading Filters...</p>
+            </div>
+          )}
+
           {permissionState === 'denied' && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-white p-4 text-center">
               <AlertTriangle className="w-10 h-10 text-pastelpink-400 mb-2" />
               <p className="text-xs text-cream-200 mb-3">{errorMessage}</p>
               <button
                 onClick={() => void startCamera()}
-                className="px-4 py-1.5 bg-white text-cream-900 border-2 border-cream-900 rounded-lg font-bold text-xs uppercase"
+                className="px-4 py-1.5 bg-white text-cream-900 border-2 border-cream-900 rounded-lg font-bold text-xs uppercase cursor-pointer"
               >
                 Retry
               </button>
@@ -233,9 +426,14 @@ export const PoseRetakeModal: React.FC<PoseRetakeModalProps> = ({
                 autoPlay
                 playsInline
                 muted
+                className="hidden"
+              />
+              <canvas
+                ref={canvasRef}
+                width={800}
+                height={600}
                 className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
               />
-              <canvas ref={canvasRef} className="hidden" />
 
               {/* Camera Switcher Button */}
               <button
@@ -245,6 +443,52 @@ export const PoseRetakeModal: React.FC<PoseRetakeModalProps> = ({
                 <SwitchCamera className="w-3.5 h-3.5" />
                 <span className="text-[9px] font-mono">{facingMode === 'user' ? 'Front' : 'Back'}</span>
               </button>
+
+              {/* AR Filter Selection */}
+              {countdown === null && !isModelLoading && hasLandmarker && (
+                <div className="absolute bottom-3 left-0 right-0 flex flex-col items-center gap-1.5 z-30 px-2 pointer-events-none">
+                  {detectedFacesCount >= 2 && (
+                    <div className="bg-cream-900/90 text-pastelpink-300 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-mono font-bold tracking-wider flex items-center gap-1.5 shadow-neo-sm border border-pastelpink-400/40 animate-pulse text-center pointer-events-auto">
+                      <span>👥 {detectedFacesCount} People Detected</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-center gap-2 max-w-full overflow-x-auto px-2 py-1.5 pointer-events-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                    {[
+                      { id: 'none', icon: '🚫' },
+                      { id: 'cyber-shades', icon: '🕶️' },
+                      { id: 'aviators', icon: '👓' },
+                      { id: 'heart-blush', icon: '💖' },
+                      { id: 'macbook-hearts', icon: '💕' },
+                      { id: 'tulip', icon: '🌸' },
+                      { id: 'noise', icon: '📺' },
+                    ].map((filt) => {
+                      const isSelected = filt.id === 'none' ? activeFilters.length === 0 : activeFilters.includes(filt.id as ARFilter);
+                      return (
+                        <button
+                          key={filt.id}
+                          onClick={() => {
+                            playClick();
+                            if (filt.id === 'none') {
+                              setActiveFilters([]);
+                            } else {
+                              const targetId = filt.id as ARFilter;
+                              setActiveFilters((prev) => {
+                                if (prev.includes(targetId)) return prev.filter((id) => id !== targetId);
+                                return [...prev, targetId];
+                              });
+                            }
+                          }}
+                          className={`w-10 h-10 flex-shrink-0 rounded-full border-2 flex items-center justify-center text-lg transition-all shadow-neo-sm cursor-pointer ${
+                            isSelected ? 'bg-pastelpink-300 text-cream-900 border-cream-900 scale-110 shadow-none ring-2 ring-white/50' : 'bg-cream-50/90 text-cream-800 border-cream-900 hover:bg-pastelpink-50'
+                          }`}
+                        >
+                          {filt.icon}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Flash Screen */}
               <AnimatePresence>
@@ -306,3 +550,4 @@ export const PoseRetakeModal: React.FC<PoseRetakeModalProps> = ({
     </div>
   );
 };
+
